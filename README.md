@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a2
+# sumTerminal 0.1.0a3
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -42,6 +42,12 @@ Open preferences with:
 sumterminal --preferences
 ```
 
+One-shot font overrides are also available:
+
+```sh
+sumterminal --font "DejaVu Sans Mono" --font-size 16
+```
+
 Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on normal XDG/POSIX systems:
 
 - global shortcut (default `Ctrl+F12`);
@@ -50,7 +56,7 @@ Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on 
 - opacity (default `94%`);
 - top/bottom position and focus-loss behavior in the configuration model.
 
-The graphical preference view exposes shortcut, height, width and opacity now. Applying preferences also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
+The graphical preference view exposes font family/name, font size, shortcut, height, width and opacity. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
 
 ## Graphical terminal screen
 
@@ -59,7 +65,7 @@ The graphical preference view exposes shortcut, height, width and opacity now. A
 - cursor positioning and movement;
 - line/display erase operations;
 - scrolling regions;
-- ANSI SGR colours;
+- ANSI SGR colours, including bright/bold base-colour rendering;
 - 256-colour and true-colour SGR;
 - bold, underline and inverse state;
 - alternate-screen switching;
@@ -89,7 +95,7 @@ Implemented now:
 - SUM-owned VT screen and GUI renderer;
 - persistent drop-down session;
 - `Ctrl+F12` toggle design and desktop integration;
-- preferences for shortcut, height, width and opacity;
+- preferences for font family/name, font size, shortcut, height, width and opacity;
 - logical cwd via `sumFSA`;
 - PTY byte transport via `sumIO`.
 

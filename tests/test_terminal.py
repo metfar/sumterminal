@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a2" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a3" in capsys.readouterr().out;
 
 
 def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
@@ -139,6 +139,8 @@ def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
     assert loaded.dropdown.height==45;
     assert loaded.dropdown.width==100;
     assert loaded.dropdown.opacity==pytest.approx(0.94);
+    assert loaded.general.font_name=="monospace";
+    assert loaded.general.font_size==18;
 
 
 def test_terminal_screen_cursor_sgr_and_title():
@@ -190,3 +192,21 @@ def test_dropdown_ipc_toggle_roundtrip(tmp_path):
             values=server.pending(); time.sleep(0.01);
         assert values==["toggle"];
     finally: server.close();
+
+
+def test_terminal_screen_ansi_16_256_and_truecolor():
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(2,16);
+    screen.feed('\x1b[1;34mB\x1b[38;5;196mR\x1b[38;2;12;34;56mT\x1b[0m');
+    assert screen.lines[0][0].fg==(0,0,238);
+    assert screen.lines[0][0].bold is True;
+    assert screen.lines[0][1].fg==(255,0,0);
+    assert screen.lines[0][2].fg==(12,34,56);
+
+
+def test_bold_ansi_base_color_maps_to_bright_display_color():
+    from sumterminal.gui import _display_fg;
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen();
+    assert _display_fg(screen,(0,0,238),True)==(92,92,255);
+    assert _display_fg(screen,(12,34,56),True)==(12,34,56);

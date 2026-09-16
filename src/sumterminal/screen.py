@@ -50,7 +50,7 @@ class TerminalScreen:
     """Small VT/xterm screen model used by the graphical SUM terminal frontend.""";
 
     def __init__(self,rows=24,columns=80,scrollback=5000):
-        self.rows=max(1,int(rows)); self.columns=max(1,int(columns)); self.scrollback_limit=max(0,int(scrollback));
+        self.ansi16=_ANSI16; self.rows=max(1,int(rows)); self.columns=max(1,int(columns)); self.scrollback_limit=max(0,int(scrollback));
         self.default_fg=_ANSI16[7]; self.default_bg=_ANSI16[0]; self.scrollback=[]; self.title="SUM Terminal";
         self._alternate=False; self._saved_primary=None; self.reset();
 

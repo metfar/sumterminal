@@ -49,6 +49,8 @@ def parser():
     value.add_argument("--shell",default=None,help="explicit shell command line instead of default sumbash");
     value.add_argument("--rows",type=int,default=24,help="initial PTY rows before frontend resize");
     value.add_argument("--columns",type=int,default=80,help="initial PTY columns before frontend resize");
+    value.add_argument("--font",default=None,help="GUI font family/name for this launch");
+    value.add_argument("--font-size",type=int,default=None,help="GUI font size for this launch");
     modes=value.add_mutually_exclusive_group(); modes.add_argument("--gui",action="store_true",help="force the SUM graphical terminal frontend"); modes.add_argument("--host",action="store_true",help="bridge the session through the current host terminal");
     value.add_argument("--drop-down",action="store_true",help="open the graphical drop-down terminal");
     value.add_argument("--toggle",action="store_true",help="toggle the installed/running drop-down terminal");
@@ -89,6 +91,9 @@ def _install(preferences):
 
 def main(argv=None):
     args=parser().parse_args(argv); preferences=load_preferences();
+    if args.font is not None: preferences.general.font_name=str(args.font);
+    if args.font_size is not None: preferences.general.font_size=int(args.font_size);
+    preferences.normalized();
     try:
         if args.print_default_shell:
             print(" ".join(shlex.quote(value) for value in default_shell_command())); return 0;
