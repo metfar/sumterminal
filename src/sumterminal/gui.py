@@ -30,6 +30,7 @@ import warnings;
 
 from .config import load_preferences;
 from .ipc import DropdownIPCServer;
+from .model import TerminalSize;
 from .screen import TerminalScreen;
 from .session import TerminalSession;
 from .theme import gui_theme, resolve_theme, terminal_ansi16, terminal_colors;
@@ -287,10 +288,10 @@ class GuiTerminalView:
         return b"";
 
     def _update_size(self,pygame,font,header_height):
-        surface=pygame.display.get_surface(); width,height=surface.get_size(); cell_w=self.cell_width; cell_h=self.cell_height; columns=max(1,width//cell_w); rows=max(1,(height-header_height)//cell_h);
+        surface=pygame.display.get_surface(); width,height=surface.get_size(); cell_w=self.cell_width; cell_h=self.cell_height; columns=max(1,width//cell_w); rows=max(1,(height-header_height)//cell_h); desired=TerminalSize(rows,columns);
         for tab in self._tabs:
             if rows!=tab.screen.rows or columns!=tab.screen.columns: tab.screen.resize(rows,columns);
-            if tab.session.poll() is None:
+            if tab.session.poll() is None and getattr(tab.session,"size",None)!=desired:
                 try: tab.session.resize(rows,columns);
                 except Exception: pass;
         return cell_w,cell_h;

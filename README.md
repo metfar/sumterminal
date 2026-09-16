@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a7
+# sumTerminal 0.1.0a8
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 

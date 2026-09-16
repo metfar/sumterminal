@@ -82,11 +82,10 @@ class PosixPTYAdapter:
 
     def resize(self,rows,columns):
         if self.master is None: raise SessionStateError("terminal session is not running");
-        self.size=TerminalSize(rows,columns).normalized();
+        requested=TerminalSize(rows,columns).normalized();
+        if requested==self.size: return self.size;
+        self.size=requested;
         self._set_winsize_fd(self.master.fd,self.size);
-        if self.process is not None and self.process.poll() is None:
-            try: os.killpg(self.process.pid,signal.SIGWINCH);
-            except (OSError,ProcessLookupError): pass;
         return self.size;
 
     def read_result(self,size=65536):

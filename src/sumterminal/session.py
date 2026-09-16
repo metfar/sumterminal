@@ -97,7 +97,9 @@ class TerminalSession:
 
     def resize(self,rows,columns):
         if self.adapter is None: raise SessionStateError("terminal session is not running");
-        self.size=self.adapter.resize(rows,columns);
+        requested=TerminalSize(rows,columns).normalized();
+        if requested==self.size: return TerminalEvent("resize",size=self.size);
+        self.size=self.adapter.resize(requested.rows,requested.columns);
         return TerminalEvent("resize",size=self.size);
 
     def write(self,data):

@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a7" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a8" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -401,3 +401,48 @@ def test_preferences_reload_keeps_existing_display_when_geometry_is_unchanged(mo
     view._reload_preferences(fake);
     assert calls==[];
     assert window_calls==[];
+
+
+def test_terminal_session_resize_is_idempotent(tmp_path):
+    from types import SimpleNamespace;
+    session=TerminalSession(command=[sys.executable,"-c","pass"],cwd=str(tmp_path),rows=24,columns=80);
+    calls=[];
+    session.adapter=SimpleNamespace(resize=lambda rows,columns:calls.append((rows,columns)) or TerminalSize(rows,columns));
+    event=session.resize(24,80);
+    assert event.size==TerminalSize(24,80);
+    assert calls==[];
+    event=session.resize(30,100);
+    assert event.size==TerminalSize(30,100);
+    assert calls==[(30,100)];
+
+
+def test_gui_update_size_does_not_repeat_identical_pty_resize():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    class Surface:
+        @staticmethod
+        def get_size(): return (800,458);
+    class Display:
+        @staticmethod
+        def get_surface(): return Surface();
+    fake=SimpleNamespace(display=Display());
+    calls=[];
+    session=SimpleNamespace(size=TerminalSize(25,100),poll=lambda:None,resize=lambda rows,columns:calls.append((rows,columns)));
+    view=GuiTerminalView(session,preferences=TerminalPreferences());
+    view.cell_width=8; view.cell_height=16;
+    view._update_size(fake,None,58);
+    assert view.screen_model.rows==25;
+    assert view.screen_model.columns==100;
+    assert calls==[];
+
+
+def test_posix_adapter_resize_ignores_unchanged_size(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.posix import PosixPTYAdapter;
+    adapter=PosixPTYAdapter(); adapter.master=SimpleNamespace(fd=123); adapter.size=TerminalSize(24,80); calls=[];
+    monkeypatch.setattr(adapter,"_set_winsize_fd",lambda fd,size:calls.append((fd,size)));
+    assert adapter.resize(24,80)==TerminalSize(24,80);
+    assert calls==[];
+    assert adapter.resize(30,90)==TerminalSize(30,90);
+    assert calls==[(123,TerminalSize(30,90))];
