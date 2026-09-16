@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a3
+# sumTerminal 0.1.0a4
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -48,6 +48,11 @@ One-shot font overrides are also available:
 sumterminal --font "DejaVu Sans Mono" --font-size 16
 ```
 
+Terminal fonts are treated as a fixed cell grid.  If the selected family is
+proportional, the renderer falls back to the system monospace family rather
+than letting glyph widths and the cursor drift apart.  Cursor geometry is
+derived from the actual font glyph height and line spacing.
+
 Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on normal XDG/POSIX systems:
 
 - global shortcut (default `Ctrl+F12`);
@@ -57,6 +62,12 @@ Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on 
 - top/bottom position and focus-loss behavior in the configuration model.
 
 The graphical preference view exposes font family/name, font size, shortcut, height, width and opacity. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
+
+When Preferences is opened from the drop-down, the terminal window is hidden
+while the preference window is active and restored afterwards.  The PTY and
+shell remain alive.  Display recreation on Apply uses the normal Pygame
+display API instead of mutating the experimental `_sdl2.Window.size` path,
+which avoids crashes seen with some distro Pygame/SDL builds.
 
 ## Graphical terminal screen
 
@@ -73,6 +84,11 @@ The graphical preference view exposes font family/name, font size, shortcut, hei
 - cursor visibility.
 
 The renderer consumes the same `TerminalSession` used by the host-terminal frontend. Terminal bytes still arrive through the PTY and `sumIO`; graphical presentation does not create a second session implementation.
+
+Every PTY session advertises `TERM=xterm-256color`, `COLORTERM=truecolor`,
+`TERM_PROGRAM=sumterminal` and `SUM_TERMINAL=1` unless the caller explicitly
+overrides a value.  This makes a session started from a desktop hotkey behave
+the same as one started from an existing terminal emulator.
 
 ## Global shortcut integration
 

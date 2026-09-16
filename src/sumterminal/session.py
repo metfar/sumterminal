@@ -52,6 +52,14 @@ class TerminalSession:
         self.logical_cwd=self.filesystem.normalize(cwd or self.filesystem.cwd);
         self.native_cwd=self.filesystem.native_path(self.logical_cwd);
         self.env=dict(env or {});
+        # A terminal emulator must advertise its own capabilities instead of
+        # inheriting whatever TERM happened to belong to the launcher.  This
+        # is especially important for desktop/global-hotkey launches, where
+        # there may be no parent terminal at all.
+        self.env.setdefault("TERM","xterm-256color");
+        self.env.setdefault("COLORTERM","truecolor");
+        self.env.setdefault("TERM_PROGRAM","sumterminal");
+        self.env.setdefault("SUM_TERMINAL","1");
         using_default=not command;
         self.argv=tuple(str(value) for value in (command or default_shell_command(self.env or None)));
         if using_default and len(self.argv)>=3 and self.argv[0]==sys.executable and self.argv[1:3]==("-m","sumbash"):

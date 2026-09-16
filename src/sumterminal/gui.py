@@ -24,11 +24,21 @@ import select;
 import shutil;
 import subprocess;
 import sys;
+import threading;
 import time;
+import warnings;
 
 from .config import load_preferences;
 from .ipc import DropdownIPCServer;
 from .screen import TerminalScreen;
+
+
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT","1");
+
+
+def _prepare_pygame_runtime():
+    warnings.filterwarnings("ignore",message=r"Your system is avx2 capable.*",category=RuntimeWarning);
+    warnings.filterwarnings("ignore",message=r"pkg_resources is deprecated as an API.*",category=UserWarning);
 
 
 def _display_fg(screen,color,bold):
@@ -45,11 +55,12 @@ class GuiTerminalView:
     """SUM-owned graphical terminal view over the presentation-neutral TerminalSession.""";
 
     def __init__(self,session,preferences=None,drop_down=False,start_hidden=False):
-        self.session=session; self.preferences=(preferences or load_preferences()).normalized(); self.drop_down=bool(drop_down); self.start_hidden=bool(start_hidden); self.visible=not self.start_hidden; self.running=False; self.screen_model=TerminalScreen(session.size.rows,session.size.columns); self.ipc=DropdownIPCServer() if self.drop_down else None; self._last_title=""; self.font=None; self.bold_font=None; self.header_font=None; self.header_height=28;
+        self.session=session; self.preferences=(preferences or load_preferences()).normalized(); self.drop_down=bool(drop_down); self.start_hidden=bool(start_hidden); self.visible=not self.start_hidden; self.running=False; self.screen_model=TerminalScreen(session.size.rows,session.size.columns); self.ipc=DropdownIPCServer() if self.drop_down else None; self._last_title=""; self.font=None; self.bold_font=None; self.header_font=None; self.header_height=28; self.cell_width=8; self.cell_height=16; self.glyph_height=16; self.glyph_offset_y=0; self.effective_font_name=self.preferences.general.font_name; self._flags=0; self._preferences_process=None; self._preferences_finished=False;
 
     @staticmethod
     def available():
         try:
+            _prepare_pygame_runtime();
             import pygame;
             import sumgui;
             return True;
@@ -102,20 +113,50 @@ class GuiTerminalView:
 
     def _make_fonts(self,pygame):
         name=self.preferences.general.font_name; size=self.preferences.general.font_size;
-        self.font=pygame.font.SysFont(name,size); self.bold_font=pygame.font.SysFont(name,size,bold=True); self.header_font=pygame.font.SysFont(name,max(12,size-2)); self.header_height=max(28,self.header_font.get_linesize()+8);
+        def make_font(font_name,font_size,bold=False):
+            path=None;
+            try:
+                if os.path.isfile(str(font_name)): path=str(font_name);
+                else: path=pygame.font.match_font(str(font_name),bold=bold);
+            except Exception: path=None;
+            return pygame.font.Font(path,font_size) if path else pygame.font.SysFont(str(font_name),font_size,bold=bold);
+        self.font=make_font(name,size,False);
+        widths=[self.font.size(char)[0] for char in "iMW0@"];
+        if max(widths)-min(widths)>1:
+            self.effective_font_name="monospace";
+            self.font=make_font("monospace",size,False);
+            self.bold_font=make_font("monospace",size,True);
+        else:
+            self.effective_font_name=name;
+            self.bold_font=make_font(name,size,True);
+        self.header_font=pygame.font.SysFont("sans",max(12,min(18,size-2)));
+        self.header_height=max(28,self.header_font.get_linesize()+8);
+        self.cell_width=max(1,self.font.size("M")[0]);
+        self.cell_height=max(1,self.font.get_linesize());
+        self.glyph_height=max(1,self.font.get_height());
+        self.glyph_offset_y=max(0,(self.cell_height-self.glyph_height)//2);
         return self.font;
 
     def _reload_preferences(self,pygame):
-        self.preferences=load_preferences().normalized(); width,height,x,y=self._geometry(pygame); window=self._sdl_window();
-        if window is not None:
-            try: window.size=(width,height); window.position=(x,y); window.opacity=float(self.preferences.dropdown.opacity if self.drop_down else 1.0);
-            except Exception: pass;
-        self._make_fonts(pygame); self._update_size(pygame,self.font,self.header_height);
+        self.preferences=load_preferences().normalized(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame);
+        # Recreate the SDL display surface instead of mutating pygame._sdl2
+        # Window.size.  The latter is unstable on some distro Pygame/SDL
+        # combinations when a second preferences window has just closed.
+        pygame.display.set_mode((width,height),self._flags); self._apply_window_properties(pygame); self._update_size(pygame,self.font,self.header_height);
 
     def _open_preferences(self):
+        if self._preferences_process is not None and self._preferences_process.poll() is None: return;
         executable=shutil.which("sumterminal");
         command=[executable,"--preferences"] if executable else [sys.executable,"-m","sumterminal","--preferences"];
-        subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);
+        if self.drop_down: self._set_visible(False);
+        try: self._preferences_process=subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);
+        except OSError:
+            self._set_visible(True); raise;
+        def wait_preferences():
+            try: self._preferences_process.wait();
+            except Exception: pass;
+            self._preferences_finished=True;
+        threading.Thread(target=wait_preferences,name="sumterminal-preferences",daemon=True).start();
 
     def _key_bytes(self,pygame,event):
         key=event.key; mod=event.mod;
@@ -131,7 +172,7 @@ class GuiTerminalView:
         return b"";
 
     def _update_size(self,pygame,font,header_height):
-        surface=pygame.display.get_surface(); width,height=surface.get_size(); cell_w=max(1,font.size("M")[0]); cell_h=max(1,font.get_linesize()); columns=max(1,width//cell_w); rows=max(1,(height-header_height)//cell_h);
+        surface=pygame.display.get_surface(); width,height=surface.get_size(); cell_w=self.cell_width; cell_h=self.cell_height; columns=max(1,width//cell_w); rows=max(1,(height-header_height)//cell_h);
         if rows!=self.screen_model.rows or columns!=self.screen_model.columns:
             self.screen_model.resize(rows,columns); self.session.resize(rows,columns);
         return cell_w,cell_h;
@@ -155,20 +196,25 @@ class GuiTerminalView:
                     chars.append(other.char); end+=1;
                 text="".join(chars); width=(end-index)*cell_w; shown_fg=_display_fg(self.screen_model,fg,bold);
                 if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y0+row*cell_h,width,cell_h));
-                renderer=self.bold_font if bold and self.bold_font is not None else font; rendered=renderer.render(text,True,shown_fg); surface.blit(rendered,(x,y0+row*cell_h));
+                renderer=self.bold_font if bold and self.bold_font is not None else font; rendered=renderer.render(text,True,shown_fg); surface.blit(rendered,(x,y0+row*cell_h+self.glyph_offset_y));
                 if underline: pygame.draw.line(surface,shown_fg,(x,y0+(row+1)*cell_h-2),(x+width,y0+(row+1)*cell_h-2),1);
                 x+=width; index=end;
         if self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
-            col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h; pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cell_h),2);
+            col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h+self.glyph_offset_y; cursor_h=min(cell_h,self.glyph_height); pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cursor_h));
+            try: char=self.screen_model.lines[self.screen_model.row][col].char;
+            except (IndexError,AttributeError): char=" ";
+            if char and char!=" ":
+                rendered=font.render(char,True,self.screen_model.default_bg); surface.blit(rendered,(x,y));
 
     def run(self):
         try:
+            _prepare_pygame_runtime();
             import pygame;
             from sumgui.display import set_default_icon;
             from sumgui.theme import make_theme;
         except ImportError as exc: raise RuntimeError("sumTerminal GUI requires sumGUI/Pygame") from exc;
         if self.session.state.value=="created": self.session.start();
-        pygame.init(); pygame.key.set_repeat(400,35); width,height,x,y=self._geometry(pygame); os.environ.setdefault("SDL_VIDEO_WINDOW_POS","{},{}".format(x,y)); flags=pygame.RESIZABLE | (pygame.NOFRAME if self.drop_down else 0); pygame.display.set_mode((width,height),flags); set_default_icon(); self._apply_window_properties(pygame);
+        pygame.init(); pygame.key.set_repeat(400,35); width,height,x,y=self._geometry(pygame); os.environ.setdefault("SDL_VIDEO_WINDOW_POS","{},{}".format(x,y)); self._flags=pygame.RESIZABLE | (pygame.NOFRAME if self.drop_down else 0); pygame.display.set_mode((width,height),self._flags); set_default_icon(); self._apply_window_properties(pygame);
         theme=make_theme(self.preferences.general.theme); self._make_fonts(pygame); self._preferences_rect=pygame.Rect(0,0,0,0); self._update_size(pygame,self.font,self.header_height);
         if self.ipc is not None: self.ipc.start();
         if self.start_hidden: self._set_visible(False);
@@ -176,6 +222,8 @@ class GuiTerminalView:
         try:
             while self.running:
                 clock.tick(60);
+                if self._preferences_finished:
+                    self._preferences_finished=False; self._reload_preferences(pygame); self._set_visible(True);
                 if self.ipc is not None:
                     for command in self.ipc.pending():
                         if command=="toggle": self.toggle_visible();

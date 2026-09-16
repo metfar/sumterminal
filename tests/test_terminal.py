@@ -128,7 +128,20 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a3" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a4" in capsys.readouterr().out;
+
+
+def test_terminal_session_advertises_its_own_capabilities(tmp_path):
+    session=TerminalSession(command=[sys.executable,"-c","pass"],cwd=str(tmp_path),env={});
+    assert session.env["TERM"]=="xterm-256color";
+    assert session.env["COLORTERM"]=="truecolor";
+    assert session.env["TERM_PROGRAM"]=="sumterminal";
+    assert session.env["SUM_TERMINAL"]=="1";
+
+
+def test_terminal_session_preserves_explicit_term(tmp_path):
+    session=TerminalSession(command=[sys.executable,"-c","pass"],cwd=str(tmp_path),env={"TERM":"vt100"});
+    assert session.env["TERM"]=="vt100";
 
 
 def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
@@ -210,3 +223,32 @@ def test_bold_ansi_base_color_maps_to_bright_display_color():
     screen=TerminalScreen();
     assert _display_fg(screen,(0,0,238),True)==(92,92,255);
     assert _display_fg(screen,(12,34,56),True)==(12,34,56);
+
+
+def test_gui_font_metrics_fall_back_to_monospace_for_proportional_font():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    class FakeFont:
+        def __init__(self,name,size): self.name=name; self._size=size;
+        def size(self,text):
+            if self.name=="proportional": return ((3 if text=="i" else 9)*len(text),16);
+            return (7*len(text),16);
+        def get_linesize(self): return 20;
+        def get_height(self): return 16;
+    class FontAPI:
+        @staticmethod
+        def match_font(name,bold=False): return None;
+        @staticmethod
+        def Font(path,size): return FakeFont("file",size);
+        @staticmethod
+        def SysFont(name,size,bold=False): return FakeFont(name,size);
+    fake=SimpleNamespace(font=FontAPI());
+    prefs=TerminalPreferences(); prefs.general.font_name="proportional"; prefs.general.font_size=18;
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs);
+    view._make_fonts(fake);
+    assert view.effective_font_name=="monospace";
+    assert view.cell_width==7;
+    assert view.cell_height==20;
+    assert view.glyph_height==16;
+    assert view.glyph_offset_y==2;

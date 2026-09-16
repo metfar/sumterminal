@@ -20,6 +20,8 @@
 #  MA 02110-1301, USA.
 #  
 import shutil;
+import os;
+import warnings;
 
 from sumkeyboard.hotkeys import install_global_shortcut, normalize_shortcut;
 
@@ -28,6 +30,7 @@ from .ipc import send_command;
 
 
 _ACTION_ID="sumterminal.dropdown";
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT","1");
 
 
 def toggle_command():
@@ -43,6 +46,8 @@ def install_dropdown_shortcut(preferences=None,apply=True):
 def show_preferences(preferences=None):
     value=(preferences or load_preferences()).normalized();
     try:
+        warnings.filterwarnings("ignore",message=r"Your system is avx2 capable.*",category=RuntimeWarning);
+        warnings.filterwarnings("ignore",message=r"pkg_resources is deprecated as an API.*",category=UserWarning);
         import pygame;
         from sumgui.easy import app, button, label, slider, start, window;
         from sumgui.widgets import TextInput;
