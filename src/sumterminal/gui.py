@@ -30,6 +30,7 @@ import warnings;
 
 from .config import load_preferences;
 from .ipc import DropdownIPCServer;
+from .input import TerminalInputEncoder;
 from .model import TerminalSize;
 from .screen import TerminalScreen;
 from .session import TerminalSession;
@@ -58,6 +59,7 @@ class _TerminalTab:
     def __init__(self,session):
         self.session=session;
         self.screen=TerminalScreen(session.size.rows,session.size.columns);
+        self.encoder=TerminalInputEncoder(self.screen.modes);
         self.eof=False;
         self.exit_code=None;
 
@@ -273,19 +275,52 @@ class GuiTerminalView:
             self._preferences_finished=True;
         threading.Thread(target=wait_preferences,name="sumterminal-preferences",daemon=True).start();
 
+    @staticmethod
+    def _semantic_key(pygame,key):
+        mapping={pygame.K_RETURN:"return",pygame.K_BACKSPACE:"backspace",pygame.K_TAB:"tab",pygame.K_ESCAPE:"escape",pygame.K_UP:"up",pygame.K_DOWN:"down",pygame.K_RIGHT:"right",pygame.K_LEFT:"left",pygame.K_HOME:"home",pygame.K_END:"end",pygame.K_PAGEUP:"pageup",pygame.K_PAGEDOWN:"pagedown",pygame.K_INSERT:"insert",pygame.K_DELETE:"delete",pygame.K_F1:"f1",pygame.K_F2:"f2",pygame.K_F3:"f3",pygame.K_F4:"f4",pygame.K_F5:"f5",pygame.K_F6:"f6",pygame.K_F7:"f7",pygame.K_F8:"f8",pygame.K_F9:"f9",pygame.K_F10:"f10",pygame.K_F11:"f11",pygame.K_F12:"f12",pygame.K_SPACE:"space"};
+        keypad=(("K_KP0","kp0"),("K_KP1","kp1"),("K_KP2","kp2"),("K_KP3","kp3"),("K_KP4","kp4"),("K_KP5","kp5"),("K_KP6","kp6"),("K_KP7","kp7"),("K_KP8","kp8"),("K_KP9","kp9"),("K_KP_PERIOD","kp_period"),("K_KP_DIVIDE","kp_divide"),("K_KP_MULTIPLY","kp_multiply"),("K_KP_MINUS","kp_minus"),("K_KP_PLUS","kp_plus"),("K_KP_ENTER","kp_enter"),("K_KP_EQUALS","kp_equals"));
+        for attribute,name in keypad:
+            value=getattr(pygame,attribute,None);
+            if value is not None: mapping[value]=name;
+        if key in mapping: return mapping[key];
+        name=pygame.key.name(key);
+        return name.casefold() if isinstance(name,str) else "";
+
     def _key_bytes(self,pygame,event):
         key=event.key; mod=event.mod;
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_COMMA: self._open_preferences(); return b"";
         if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==pygame.K_t: self._new_tab(); return b"";
-        special={pygame.K_RETURN:b"\r",pygame.K_KP_ENTER:b"\r",pygame.K_BACKSPACE:b"\x7f",pygame.K_TAB:b"\t",pygame.K_ESCAPE:b"\x1b",pygame.K_UP:b"\x1b[A",pygame.K_DOWN:b"\x1b[B",pygame.K_RIGHT:b"\x1b[C",pygame.K_LEFT:b"\x1b[D",pygame.K_HOME:b"\x1b[H",pygame.K_END:b"\x1b[F",pygame.K_PAGEUP:b"\x1b[5~",pygame.K_PAGEDOWN:b"\x1b[6~",pygame.K_INSERT:b"\x1b[2~",pygame.K_DELETE:b"\x1b[3~",pygame.K_F1:b"\x1bOP",pygame.K_F2:b"\x1bOQ",pygame.K_F3:b"\x1bOR",pygame.K_F4:b"\x1bOS",pygame.K_F5:b"\x1b[15~",pygame.K_F6:b"\x1b[17~",pygame.K_F7:b"\x1b[18~",pygame.K_F8:b"\x1b[19~",pygame.K_F9:b"\x1b[20~",pygame.K_F10:b"\x1b[21~",pygame.K_F11:b"\x1b[23~",pygame.K_F12:b"\x1b[24~"};
-        if key in special:
-            data=special[key]; return b"\x1b"+data if (mod & pygame.KMOD_ALT) and data!=b"\x1b" else data;
-        if mod & pygame.KMOD_CTRL:
-            name=pygame.key.name(key);
-            if len(name)==1 and "a"<=name.casefold()<="z": return bytes([ord(name.casefold())-96]);
-            if key==pygame.K_SPACE: return b"\x00";
-        return b"";
+        shift=bool(mod & pygame.KMOD_SHIFT); alt=bool(mod & pygame.KMOD_ALT); ctrl=bool(mod & pygame.KMOD_CTRL);
+        return self.active_tab.encoder.encode_key(self._semantic_key(pygame,key),shift=shift,alt=alt,ctrl=ctrl,text=getattr(event,"unicode",""));
+
+    def _mouse_bytes(self,pygame,event,pressed=True):
+        screen=self.screen_model;
+        if not screen.mouse_tracking or not screen.mouse_sgr: return b"";
+        if not hasattr(event,"pos"): return b"";
+        x,y=event.pos;
+        if y<self.header_height: return b"";
+        column=max(1,min(screen.columns,(int(x)//max(1,self.cell_width))+1)); row=max(1,min(screen.rows,((int(y)-self.header_height)//max(1,self.cell_height))+1));
+        mod=pygame.key.get_mods(); modifier=(4 if mod & pygame.KMOD_SHIFT else 0)+(8 if mod & pygame.KMOD_ALT else 0)+(16 if mod & pygame.KMOD_CTRL else 0);
+        button_map={1:0,2:1,3:2,4:64,5:65}; button=int(getattr(event,"button",1)); code=button_map.get(button,0)+modifier;
+        final="M" if pressed or button in (4,5) else "m";
+        return "\x1b[<{};{};{}{}".format(code,column,row,final).encode("ascii");
+
+    def _mouse_motion_bytes(self,pygame,event):
+        screen=self.screen_model;
+        if screen.mouse_tracking not in (1002,1003) or not screen.mouse_sgr: return b"";
+        buttons=tuple(getattr(event,"buttons",()));
+        if screen.mouse_tracking==1002 and not any(buttons): return b"";
+        base=3;
+        if buttons:
+            if len(buttons)>0 and buttons[0]: base=0;
+            elif len(buttons)>1 and buttons[1]: base=1;
+            elif len(buttons)>2 and buttons[2]: base=2;
+        x,y=event.pos;
+        if y<self.header_height: return b"";
+        column=max(1,min(screen.columns,(int(x)//max(1,self.cell_width))+1)); row=max(1,min(screen.rows,((int(y)-self.header_height)//max(1,self.cell_height))+1));
+        mod=pygame.key.get_mods(); modifier=(4 if mod & pygame.KMOD_SHIFT else 0)+(8 if mod & pygame.KMOD_ALT else 0)+(16 if mod & pygame.KMOD_CTRL else 0); code=32+base+modifier;
+        return "\x1b[<{};{};{}M".format(code,column,row).encode("ascii");
 
     def _update_size(self,pygame,font,header_height):
         surface=pygame.display.get_surface(); width,height=surface.get_size(); cell_w=self.cell_width; cell_h=self.cell_height; columns=max(1,width//cell_w); rows=max(1,(height-header_height)//cell_h); desired=TerminalSize(rows,columns);
@@ -376,7 +411,12 @@ class GuiTerminalView:
             if tab is None: continue;
             event=tab.session.read_event(65536);
             if event is None: continue;
-            if event.kind=="output": tab.screen.feed(event.text);
+            if event.kind=="output":
+                tab.screen.feed(event.text);
+                while tab.screen.pending_replies:
+                    reply=tab.screen.pending_replies.pop(0);
+                    try: tab.session.write(reply);
+                    except Exception: break;
             elif event.kind=="eof": tab.eof=True;
             elif event.kind=="exit": tab.exit_code=int(event.exit_code or 0);
         exited=[];
@@ -420,7 +460,17 @@ class GuiTerminalView:
                 for event in pygame.event.get():
                     if event.type==pygame.QUIT: self.running=False;
                     elif event.type==pygame.VIDEORESIZE: self._update_size(pygame,self.font,self.header_height);
-                    elif event.type==pygame.MOUSEBUTTONDOWN and event.button==1: self._handle_header_click(event.pos);
+                    elif event.type==pygame.MOUSEBUTTONDOWN:
+                        handled=event.button==1 and self._handle_header_click(event.pos);
+                        if not handled:
+                            data=self._mouse_bytes(pygame,event,True);
+                            if data and self.running: self.session.write(data);
+                    elif event.type==pygame.MOUSEBUTTONUP:
+                        data=self._mouse_bytes(pygame,event,False);
+                        if data and self.running: self.session.write(data);
+                    elif event.type==pygame.MOUSEMOTION:
+                        data=self._mouse_motion_bytes(pygame,event);
+                        if data and self.running: self.session.write(data);
                     elif event.type==pygame.KEYDOWN:
                         data=self._key_bytes(pygame,event);
                         if data and self.running: self.session.write(data);

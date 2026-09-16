@@ -22,11 +22,13 @@
 from .config import DropdownPreferences, GeneralPreferences, TerminalPreferences, config_path, load_preferences, save_preferences;
 from .decoder import TerminalDecoder;
 from .errors import SessionStateError, TerminalError, UnsupportedPlatformError;
+from .input import TerminalInputEncoder;
+from .modes import TerminalModes;
 from .model import SessionInfo, SessionState, TerminalEvent, TerminalSize;
 from .screen import Cell, TerminalScreen;
 from .session import TerminalSession, default_shell_command;
 from .view import HostTerminalView;
 from .gui import GuiTerminalView;
 
-__version__="0.1.0a8";
-__all__=["Cell","DropdownPreferences","GeneralPreferences","GuiTerminalView","HostTerminalView","SessionInfo","SessionState","SessionStateError","TerminalDecoder","TerminalError","TerminalEvent","TerminalPreferences","TerminalScreen","TerminalSession","TerminalSize","UnsupportedPlatformError","config_path","default_shell_command","load_preferences","save_preferences"];
+__version__="0.1.0a9";
+__all__=["Cell","DropdownPreferences","GeneralPreferences","GuiTerminalView","HostTerminalView","SessionInfo","SessionState","SessionStateError","TerminalDecoder","TerminalError","TerminalEvent","TerminalInputEncoder","TerminalModes","TerminalPreferences","TerminalScreen","TerminalSession","TerminalSize","UnsupportedPlatformError","config_path","default_shell_command","load_preferences","save_preferences"];

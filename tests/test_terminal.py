@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a8" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a9" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -446,3 +446,154 @@ def test_posix_adapter_resize_ignores_unchanged_size(monkeypatch):
     assert calls==[];
     assert adapter.resize(30,90)==TerminalSize(30,90);
     assert calls==[(123,TerminalSize(30,90))];
+
+
+
+def test_vt_application_cursor_mode_switches_encoder_sequences():
+    from sumterminal.input import TerminalInputEncoder;
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(); encoder=TerminalInputEncoder(screen.modes);
+    assert encoder.encode_key("up")==b"\x1b[A";
+    assert encoder.encode_key("home")==b"\x1b[H";
+    screen.feed("\x1b[?1h");
+    assert screen.application_cursor_keys is True;
+    assert encoder.encode_key("up")==b"\x1bOA";
+    assert encoder.encode_key("home")==b"\x1bOH";
+    screen.feed("\x1b[?1l");
+    assert screen.application_cursor_keys is False;
+    assert encoder.encode_key("left")==b"\x1b[D";
+
+
+def test_terminfo_smkx_and_rmkx_semantics_match_xterm_cursor_and_keypad_modes():
+    from sumterminal.input import TerminalInputEncoder;
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(); encoder=TerminalInputEncoder(screen.modes);
+    screen.feed("\x1b[?1h\x1b=");
+    assert screen.application_cursor_keys is True;
+    assert screen.application_keypad is True;
+    assert encoder.encode_key("up")==b"\x1bOA";
+    assert encoder.encode_key("kp1")==b"\x1bOq";
+    assert encoder.encode_key("kp_enter")==b"\x1bOM";
+    screen.feed("\x1b[?1l\x1b>");
+    assert screen.application_cursor_keys is False;
+    assert screen.application_keypad is False;
+    assert encoder.encode_key("up")==b"\x1b[A";
+    assert encoder.encode_key("kp1")==b"1";
+    assert encoder.encode_key("kp_enter")==b"\r";
+
+
+def test_xterm_modified_cursor_and_function_keys_are_encoded_compatibly():
+    from sumterminal.input import TerminalInputEncoder;
+    encoder=TerminalInputEncoder();
+    assert encoder.encode_key("up",shift=True)==b"\x1b[1;2A";
+    assert encoder.encode_key("left",alt=True)==b"\x1b[1;3D";
+    assert encoder.encode_key("right",ctrl=True)==b"\x1b[1;5C";
+    assert encoder.encode_key("down",shift=True,ctrl=True)==b"\x1b[1;6B";
+    assert encoder.encode_key("f3",alt=True)==b"\x1b[1;3R";
+    assert encoder.encode_key("pageup",shift=True)==b"\x1b[5;2~";
+    assert encoder.encode_key("tab",shift=True)==b"\x1b[Z";
+
+
+def test_alt_printable_and_ctrl_alt_sequences_are_encoded_for_tui_shortcuts():
+    from sumterminal.input import TerminalInputEncoder;
+    from sumtui.backends.input import AnsiDecoder;
+    encoder=TerminalInputEncoder(); decoder=AnsiDecoder(escape_timeout=0.0);
+    assert encoder.encode_key("p",alt=True,text="p")==b"\x1bp";
+    events=decoder.feed(encoder.encode_key("p",alt=True,text="p")); assert len(events)==1; assert events[0].key=="p"; assert events[0].alt is True;
+    assert encoder.encode_key("w",ctrl=True,alt=True)==b"\x1b\x17";
+    events=decoder.feed(encoder.encode_key("w",ctrl=True,alt=True)); assert len(events)==1; assert events[0].key=="w"; assert events[0].ctrl is True; assert events[0].alt is True;
+
+
+def test_sumtui_decoder_accepts_sumterminal_key_sequences():
+    from sumterminal.input import TerminalInputEncoder;
+    from sumtui.backends.input import AnsiDecoder;
+    from sumtui.events import Key;
+    encoder=TerminalInputEncoder(); decoder=AnsiDecoder(escape_timeout=0.0);
+    cases=((encoder.encode_key("up"),Key.UP,False,False,False),(encoder.encode_key("up",ctrl=True,shift=True),Key.UP,True,False,True),(encoder.encode_key("f3",alt=True),Key.F3,False,True,False),(encoder.encode_key("pageup",shift=True),Key.PAGE_UP,False,False,True));
+    for data,key,ctrl,alt,shift in cases:
+        events=decoder.feed(data); assert len(events)==1; event=events[0]; assert event.key==key; assert event.ctrl is ctrl; assert event.alt is alt; assert event.shift is shift;
+
+
+def test_screen_tracks_sumtui_keyboard_reporting_request_without_losing_modes():
+    from sumterminal.input import TerminalInputEncoder;
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(); encoder=TerminalInputEncoder(screen.modes);
+    screen.feed("\x1b[>27u\x1b[=27u");
+    assert screen.keyboard_flags==27;
+    screen.feed("\x1b[?1h\x1b=");
+    assert encoder.encode_key("up")==b"\x1bOA";
+    assert encoder.encode_key("kp1")==b"\x1bOq";
+    screen.feed("\x1bc");
+    assert screen.keyboard_flags==0;
+    assert encoder.encode_key("up")==b"\x1b[A";
+
+
+def test_bracketed_paste_encoder_follows_terminal_mode():
+    from sumterminal.input import TerminalInputEncoder;
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(); encoder=TerminalInputEncoder(screen.modes);
+    assert encoder.encode_paste("alpha\nbeta")==b"alpha\nbeta";
+    screen.feed("\x1b[?2004h");
+    assert encoder.encode_paste("alpha\nbeta")==b"\x1b[200~alpha\nbeta\x1b[201~";
+    screen.feed("\x1b[?2004l");
+    assert encoder.encode_paste("x")==b"x";
+
+
+@pytest.mark.skipif(os.name!="posix",reason="POSIX PTY test")
+def test_application_cursor_roundtrip_through_real_pty(tmp_path):
+    from sumterminal.input import TerminalInputEncoder;
+    from sumterminal.screen import TerminalScreen;
+    code="import os,tty; tty.setraw(0); os.write(1,b'\\x1b[?1h\\x1b=READY'); data=os.read(0,3); os.write(1,b'\\r\\nGOT:'+data.hex().encode()+b'\\r\\n')";
+    session=TerminalSession(command=[sys.executable,"-u","-c",code],cwd=str(tmp_path)).start(); screen=TerminalScreen(); encoder=TerminalInputEncoder(screen.modes); captured=bytearray();
+    try:
+        deadline=time.monotonic()+3.0;
+        while time.monotonic()<deadline and b"READY" not in captured:
+            ready,_,_=select.select([session.fileno],[],[],0.05);
+            if ready:
+                event=session.read_event(65536);
+                if event is not None and event.kind=="output": captured.extend(event.raw); screen.feed(event.text);
+        assert b"READY" in captured;
+        assert screen.application_cursor_keys is True;
+        assert screen.application_keypad is True;
+        session.write(encoder.encode_key("up"));
+        captured.extend(_collect(session,timeout=3.0));
+        assert b"GOT:1b4f41" in bytes(captured).replace(b"\r",b"");
+        assert session.wait(timeout=2.0)==0;
+    finally: session.close();
+
+
+@pytest.mark.skipif(os.name!="posix",reason="POSIX PTY test")
+def test_sumedit_tui_accepts_sumterminal_cursor_and_alt_f3_sequences(tmp_path):
+    from sumterminal.input import TerminalInputEncoder;
+    from sumterminal.screen import TerminalScreen;
+    path=tmp_path/"sample.txt"; path.write_text("alpha\nbeta\ngamma\n",encoding="utf-8");
+    pythonpath=os.pathsep.join(os.path.abspath(value or os.getcwd()) for value in sys.path);
+    session=TerminalSession(command=[sys.executable,"-m","sumtui.tools.edit",str(path)],cwd=str(tmp_path),env={"PYTHONPATH":pythonpath},rows=30,columns=100).start(); screen=TerminalScreen(30,100); encoder=TerminalInputEncoder(screen.modes); raw=bytearray();
+    try:
+        deadline=time.monotonic()+2.0;
+        while time.monotonic()<deadline and b"\x1b[?1049h" not in raw:
+            ready,_,_=select.select([session.fileno],[],[],0.05);
+            if ready:
+                event=session.read_event(65536);
+                if event is not None and event.kind=="output": raw.extend(event.raw); screen.feed(event.text);
+        assert session.poll() is None;
+        assert b"\x1b[>27u" in raw;
+        assert b"\x1b[?1049h" in raw;
+        session.write(encoder.encode_key("right")); session.write(encoder.encode_key("down"));
+        deadline=time.monotonic()+0.5;
+        while time.monotonic()<deadline:
+            ready,_,_=select.select([session.fileno],[],[],0.05);
+            if ready:
+                event=session.read_event(65536);
+                if event is not None and event.kind=="output": screen.feed(event.text);
+        session.write(encoder.encode_key("f3",alt=True));
+        deadline=time.monotonic()+3.0;
+        while time.monotonic()<deadline and session.poll() is None:
+            ready,_,_=select.select([session.fileno],[],[],0.05);
+            if ready: session.read_event(65536);
+        assert session.poll()==0;
+    finally:
+        if session.poll() is None: session.terminate();
+        try: session.wait(timeout=1.0);
+        except Exception: pass;
+        session.close();
