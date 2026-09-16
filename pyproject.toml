@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sumterminal"
+version = "0.1.0a1"
+description = "Reusable terminal-session engine and standalone terminal host for the SUM ecosystem."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-2.0-or-later" }
+authors = [{ name = "William Martinez Bas", email = "metfar@gmail.com" }]
+dependencies = ["sumfsa>=0.1.0a1", "sumio>=0.1.0a1", "sumbash>=0.1.0a15"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Shells",
+    "Topic :: Terminals",
+]
+
+[project.scripts]
+sumterminal = "sumterminal.cli:main"
+sumterm = "sumterminal.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["sumterminal*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../../sumfsa/sumfsa/src", "../../sumio/sumio/src", "../../sumbash/sumbash/src", "../../sumcore/sumcore/src"]
+testpaths = ["tests"]
