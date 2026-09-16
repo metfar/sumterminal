@@ -36,6 +36,7 @@ from .gui import GuiTerminalView;
 from .ipc import send_command;
 from .preferences import install_dropdown_shortcut, show_preferences;
 from .session import TerminalSession, default_shell_command;
+from .theme import available_terminal_themes, canonical_theme_name;
 from .view import HostTerminalView;
 
 
@@ -49,6 +50,8 @@ def parser():
     value.add_argument("--shell",default=None,help="explicit shell command line instead of default sumbash");
     value.add_argument("--rows",type=int,default=24,help="initial PTY rows before frontend resize");
     value.add_argument("--columns",type=int,default=80,help="initial PTY columns before frontend resize");
+    value.add_argument("--theme",default=None,help="SUM theme for this launch (built-in or user theme)");
+    value.add_argument("--list-themes",action="store_true",help="list available SUM themes and exit");
     value.add_argument("--font",default=None,help="GUI font family/name for this launch");
     value.add_argument("--font-size",type=int,default=None,help="GUI font size for this launch");
     modes=value.add_mutually_exclusive_group(); modes.add_argument("--gui",action="store_true",help="force the SUM graphical terminal frontend"); modes.add_argument("--host",action="store_true",help="bridge the session through the current host terminal");
@@ -98,6 +101,10 @@ def _install(preferences):
 
 def main(argv=None):
     args=parser().parse_args(argv); preferences=load_preferences();
+    if args.list_themes:
+        for name in available_terminal_themes(): print(name);
+        return 0;
+    if args.theme is not None: preferences.general.theme=canonical_theme_name(args.theme,strict=True);
     if args.font is not None: preferences.general.font_name=str(args.font);
     if args.font_size is not None: preferences.general.font_size=int(args.font_size);
     preferences.normalized();

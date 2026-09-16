@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a5" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a6" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -319,3 +319,57 @@ def test_new_tab_starts_configured_default_shell(tmp_path):
             try: item.session.wait(timeout=1.0);
             except Exception: pass;
             item.session.close();
+
+
+def test_terminal_theme_resolves_sum_builtin_and_ansi_palette():
+    from sumterminal.theme import resolve_theme, terminal_ansi16, terminal_colors;
+    theme=resolve_theme("DOS"); palette=terminal_ansi16(theme); foreground,background,cursor,_selection_bg,_selection_text=terminal_colors(theme);
+    assert theme.name=="DOS";
+    assert palette[1]==(170,0,0);
+    assert palette[4]==(0,0,170);
+    assert foreground==theme.viewer_text;
+    assert background==theme.viewer_bg;
+    assert cursor==theme.cursor;
+
+
+def test_terminal_screen_palette_hot_reload_recolors_indexed_cells():
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(2,12); screen.feed("\x1b[31mR\x1b[0mX"); palette=list(screen.ansi16); palette[1]=(1,2,3); new_fg=(210,220,230); new_bg=(4,5,6);
+    screen.set_palette(tuple(palette),default_fg=new_fg,default_bg=new_bg,remap=True);
+    assert screen.lines[0][0].fg==(1,2,3);
+    assert screen.lines[0][1].fg==new_fg;
+    assert screen.lines[0][1].bg==new_bg;
+    screen.feed("\x1b[38;5;1mY");
+    assert screen.lines[0][2].fg==(1,2,3);
+
+
+def test_preferences_persist_theme(tmp_path):
+    from sumterminal.config import TerminalPreferences, load_preferences, save_preferences;
+    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); value.general.theme="DOS"; save_preferences(value,path); loaded=load_preferences(path);
+    assert loaded.general.theme=="DOS";
+
+
+def test_cli_lists_available_themes(capsys):
+    from sumterminal.cli import main;
+    assert main(["--list-themes"])==0;
+    output=capsys.readouterr().out.splitlines();
+    assert "Dark" in output;
+    assert "DOS" in output;
+
+
+def test_cli_theme_option_is_parsed():
+    from sumterminal.cli import parser;
+    args=parser().parse_args(["--theme","Light","--host"]);
+    assert args.theme=="Light";
+    assert args.host is True;
+
+
+def test_user_sum_theme_is_available_to_terminal(tmp_path,monkeypatch):
+    import json;
+    monkeypatch.setenv("XDG_CONFIG_HOME",str(tmp_path));
+    from sumtui.theme import make_theme, theme_to_dict;
+    from sumterminal.theme import available_terminal_themes, canonical_theme_name, resolve_theme;
+    directory=tmp_path/"sumtui"/"themes"; directory.mkdir(parents=True); payload=theme_to_dict(make_theme("Dark").copy(name="Ocean Test",viewer_bg=(1,2,3),viewer_text=(210,220,230))); (directory/"ocean-test.json").write_text(json.dumps(payload),encoding="utf-8");
+    assert "Ocean Test" in available_terminal_themes();
+    assert canonical_theme_name("ocean test",strict=True)=="Ocean Test";
+    assert resolve_theme("Ocean Test").viewer_bg==(1,2,3);

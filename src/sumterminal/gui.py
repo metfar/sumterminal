@@ -32,6 +32,7 @@ from .config import load_preferences;
 from .ipc import DropdownIPCServer;
 from .screen import TerminalScreen;
 from .session import TerminalSession;
+from .theme import gui_theme, resolve_theme, terminal_ansi16, terminal_colors;
 
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT","1");
@@ -91,6 +92,21 @@ class GuiTerminalView:
         self._new_tab_rect=None;
         self._tab_rects=[];
         self._tab_close_rects=[];
+        self.sum_theme=resolve_theme(self.preferences.general.theme);
+        self.theme=None;
+        self._apply_theme_to_screens();
+
+    def _apply_theme_to_screens(self):
+        foreground,background,_cursor,_selection_bg,_selection_text=terminal_colors(self.sum_theme);
+        palette=terminal_ansi16(self.sum_theme);
+        for tab in self._tabs: tab.screen.set_palette(palette,default_fg=foreground,default_bg=background,remap=True);
+        return self.theme;
+
+    def _reload_theme(self,include_gui=True):
+        self.sum_theme=resolve_theme(self.preferences.general.theme);
+        if include_gui: self.theme=gui_theme(self.sum_theme);
+        self._apply_theme_to_screens();
+        return self.theme;
 
     @property
     def active_tab(self):
@@ -132,6 +148,7 @@ class GuiTerminalView:
             source.screen.feed("\r\nsumterminal: could not open new tab: {}\r\n".format(exc));
             return None;
         self._tabs.append(_TerminalTab(session));
+        foreground,background,_cursor,_selection_bg,_selection_text=terminal_colors(self.sum_theme); self._tabs[-1].screen.set_palette(terminal_ansi16(self.sum_theme),default_fg=foreground,default_bg=background,remap=False);
         self._active_index=len(self._tabs)-1;
         self._last_title="";
         return self.active_tab;
@@ -232,7 +249,7 @@ class GuiTerminalView:
         return self.font;
 
     def _reload_preferences(self,pygame):
-        self.preferences=load_preferences().normalized(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame);
+        self.preferences=load_preferences().normalized(); self._reload_theme(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame);
         pygame.display.set_mode((width,height),self._flags); self._apply_window_properties(pygame); self._update_size(pygame,self.font,self.header_height);
 
     def _open_preferences(self):
@@ -372,11 +389,10 @@ class GuiTerminalView:
             _prepare_pygame_runtime();
             import pygame;
             from sumgui.display import set_default_icon;
-            from sumgui.theme import make_theme;
         except ImportError as exc: raise RuntimeError("sumTerminal GUI requires sumGUI/Pygame") from exc;
         if self.session.state.value=="created": self.session.start();
         pygame.init(); pygame.key.set_repeat(400,35); width,height,x,y=self._geometry(pygame); os.environ.setdefault("SDL_VIDEO_WINDOW_POS","{},{}".format(x,y)); self._flags=pygame.RESIZABLE | (pygame.NOFRAME if self.drop_down else 0); pygame.display.set_mode((width,height),self._flags); set_default_icon(); self._apply_window_properties(pygame);
-        theme=make_theme(self.preferences.general.theme); self._make_fonts(pygame); self._preferences_rect=pygame.Rect(0,0,0,0); self._new_tab_rect=pygame.Rect(0,0,0,0); self._update_size(pygame,self.font,self.header_height);
+        self._reload_theme(); theme=self.theme; self._make_fonts(pygame); self._preferences_rect=pygame.Rect(0,0,0,0); self._new_tab_rect=pygame.Rect(0,0,0,0); self._update_size(pygame,self.font,self.header_height);
         if self.ipc is not None: self.ipc.start();
         if self.start_hidden: self._set_visible(False);
         clock=pygame.time.Clock(); self.running=True; exit_code=0;
@@ -409,7 +425,7 @@ class GuiTerminalView:
                 if self.screen_model.title!=self._last_title:
                     pygame.display.set_caption(self.screen_model.title or "SUM Terminal"); self._last_title=self.screen_model.title;
                 if self.visible:
-                    surface=pygame.display.get_surface(); surface.fill(theme.bg); cell_w,cell_h=self._update_size(pygame,self.font,self.header_height); self._draw_header(pygame,surface,self.header_font,theme,self.header_height); self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h); pygame.display.flip();
+                    surface=pygame.display.get_surface(); theme=self.theme; surface.fill(theme.bg); cell_w,cell_h=self._update_size(pygame,self.font,self.header_height); self._draw_header(pygame,surface,self.header_font,theme,self.header_height); pygame.draw.rect(surface,self.screen_model.default_bg,(0,self.header_height,surface.get_width(),max(0,surface.get_height()-self.header_height))); self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h); pygame.display.flip();
         finally:
             if self.ipc is not None: self.ipc.close();
             for tab in list(self._tabs):

@@ -28,5 +28,5 @@ from .session import TerminalSession, default_shell_command;
 from .view import HostTerminalView;
 from .gui import GuiTerminalView;
 
-__version__="0.1.0a5";
+__version__="0.1.0a6";
 __all__=["Cell","DropdownPreferences","GeneralPreferences","GuiTerminalView","HostTerminalView","SessionInfo","SessionState","SessionStateError","TerminalDecoder","TerminalError","TerminalEvent","TerminalPreferences","TerminalScreen","TerminalSession","TerminalSize","UnsupportedPlatformError","config_path","default_shell_command","load_preferences","save_preferences"];

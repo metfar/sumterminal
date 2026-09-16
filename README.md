@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a5
+# sumTerminal 0.1.0a6
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -56,6 +56,16 @@ Tabs can also be selected with the mouse, closed with the `×` on the tab, or
 created with the `+` button.  Background tabs continue to drain their PTYs so
 long-running commands do not block merely because another tab is visible.
 
+Themes are shared with the SUM theme system (`sumtheme` / `sumTUI`) rather than maintained as a terminal-only theme database.  Built-in and user themes can be selected in Preferences, listed from the command line, or overridden for one launch:
+
+```sh
+sumterminal --list-themes
+sumterminal --theme Dark
+sumterminal --theme DOS
+```
+
+The application chrome uses the theme's normal SUM roles (`bg`, `panel`, `line`, `text`, selection and cursor colours).  The terminal surface uses `viewer_bg` / `viewer_text`, the cursor colour and the theme palette.  ANSI indexes 0-15 are themeable; xterm colours 16-255 retain the standard colour cube/greyscale and true-colour SGR values are rendered exactly as requested by the application.  Theme changes are hot-reloaded into existing tabs without restarting their PTYs or shells.
+
 One-shot font overrides are also available:
 
 ```sh
@@ -75,7 +85,7 @@ Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on 
 - opacity (default `94%`);
 - top/bottom position and focus-loss behavior in the configuration model.
 
-The graphical preference view exposes the default shell command, font family/name, font size, shortcut, height, width and opacity.  The default shell is `sumbash`; values such as `bash -l`, `zsh`, `python` or an explicit executable/argument line are also accepted.  Changing the default shell affects subsequently created tabs and future terminal launches; it does not replace shells already running in existing tabs. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
+The graphical preference view exposes the SUM theme, default shell command, font family/name, font size, shortcut, height, width and opacity.  The default shell is `sumbash`; values such as `bash -l`, `zsh`, `python` or an explicit executable/argument line are also accepted.  Changing the default shell affects subsequently created tabs and future terminal launches; it does not replace shells already running in existing tabs. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
 
 When Preferences is opened from the drop-down, the terminal window is hidden
 while the preference window is active and restored afterwards.  The PTY and

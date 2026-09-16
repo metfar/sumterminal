@@ -25,9 +25,10 @@ from dataclasses import dataclass;
 _ANSI16=((0,0,0),(205,0,0),(0,205,0),(205,205,0),(0,0,238),(205,0,205),(0,205,205),(229,229,229),(127,127,127),(255,0,0),(0,255,0),(255,255,0),(92,92,255),(255,0,255),(0,255,255),(255,255,255));
 
 
-def _xterm_color(index):
+def _xterm_color(index,ansi16=None):
+    palette=tuple(ansi16 or _ANSI16);
     index=max(0,min(255,int(index)));
-    if index<16: return _ANSI16[index];
+    if index<16: return palette[index];
     if index<232:
         value=index-16; r=value//36; g=(value%36)//6; b=value%6; levels=(0,95,135,175,215,255); return (levels[r],levels[g],levels[b]);
     level=8+(index-232)*10; return (level,level,level);
@@ -50,9 +51,28 @@ class TerminalScreen:
     """Small VT/xterm screen model used by the graphical SUM terminal frontend.""";
 
     def __init__(self,rows=24,columns=80,scrollback=5000):
-        self.ansi16=_ANSI16; self.rows=max(1,int(rows)); self.columns=max(1,int(columns)); self.scrollback_limit=max(0,int(scrollback));
-        self.default_fg=_ANSI16[7]; self.default_bg=_ANSI16[0]; self.scrollback=[]; self.title="SUM Terminal";
+        self.ansi16=tuple(_ANSI16); self.rows=max(1,int(rows)); self.columns=max(1,int(columns)); self.scrollback_limit=max(0,int(scrollback));
+        self.default_fg=self.ansi16[7]; self.default_bg=self.ansi16[0]; self.scrollback=[]; self.title="SUM Terminal";
         self._alternate=False; self._saved_primary=None; self.reset();
+
+    def set_palette(self,ansi16=None,default_fg=None,default_bg=None,remap=True):
+        old_palette=tuple(self.ansi16); old_fg=tuple(self.default_fg); old_bg=tuple(self.default_bg);
+        new_palette=tuple(tuple(color) for color in (ansi16 or old_palette));
+        if len(new_palette)<16: new_palette=new_palette+tuple(_ANSI16[len(new_palette):]);
+        new_palette=new_palette[:16]; new_fg=tuple(default_fg or new_palette[7]); new_bg=tuple(default_bg or new_palette[0]);
+        def remap_color(color,is_background=False):
+            value=tuple(color); old_default=old_bg if is_background else old_fg; new_default=new_bg if is_background else new_fg;
+            if value==old_default: return new_default;
+            try: index=old_palette.index(value);
+            except ValueError: return value;
+            return new_palette[index] if index<len(new_palette) else value;
+        if remap:
+            for line in list(self.lines)+list(self.scrollback):
+                for cell in line:
+                    cell.fg=remap_color(cell.fg,False); cell.bg=remap_color(cell.bg,True);
+            self.fg=remap_color(self.fg,False); self.bg=remap_color(self.bg,True);
+        self.ansi16=new_palette; self.default_fg=new_fg; self.default_bg=new_bg;
+        return self;
 
     def _blank_cell(self):
         return Cell(" ",self.default_fg,self.default_bg,False,False,False);
@@ -141,16 +161,16 @@ class TerminalScreen:
             elif code==22: self.bold=False;
             elif code==24: self.underline=False;
             elif code==27: self.inverse=False;
-            elif 30<=code<=37: self.fg=_ANSI16[code-30];
-            elif 90<=code<=97: self.fg=_ANSI16[8+code-90];
-            elif 40<=code<=47: self.bg=_ANSI16[code-40];
-            elif 100<=code<=107: self.bg=_ANSI16[8+code-100];
+            elif 30<=code<=37: self.fg=self.ansi16[code-30];
+            elif 90<=code<=97: self.fg=self.ansi16[8+code-90];
+            elif 40<=code<=47: self.bg=self.ansi16[code-40];
+            elif 100<=code<=107: self.bg=self.ansi16[8+code-100];
             elif code==39: self.fg=self.default_fg;
             elif code==49: self.bg=self.default_bg;
             elif code in (38,48):
                 target="fg" if code==38 else "bg";
                 if index+2<len(params) and params[index+1]==5:
-                    setattr(self,target,_xterm_color(params[index+2])); index+=2;
+                    setattr(self,target,_xterm_color(params[index+2],self.ansi16)); index+=2;
                 elif index+4<len(params) and params[index+1]==2:
                     rgb=tuple(max(0,min(255,int(value))) for value in params[index+2:index+5]); setattr(self,target,rgb); index+=4;
             index+=1;
