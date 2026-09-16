@@ -101,7 +101,7 @@ def show_preferences(preferences=None):
             if not shell_value: shell_value="sumbash";
             if shell_value.casefold()!="sumbash" and not shlex.split(shell_value): raise ValueError("default shell command is empty");
             value.general.shell=shell_value; value.general.theme=canonical_theme_name(theme_name.value(),strict=True); value.general.font_name=str(font_name.value() or "monospace").strip(); value.general.font_size=int(round(font_size.value)); value.dropdown.shortcut=normalize_shortcut(shortcut.value()); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
-            send_command("reload"); status.text="Saved {} — {}".format(path,result.detail);
+            send_command("reload"); status.text="Saved {} — {}. Active terminal applies after Preferences closes.".format(path,result.detail);
             if close: app().running=False;
         except Exception as exc:
             status.text="Could not apply preferences: {}".format(exc);

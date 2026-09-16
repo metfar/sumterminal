@@ -88,6 +88,7 @@ class GuiTerminalView:
         self._flags=0;
         self._preferences_process=None;
         self._preferences_finished=False;
+        self._preferences_reload_pending=False;
         self._preferences_rect=None;
         self._new_tab_rect=None;
         self._tab_rects=[];
@@ -249,13 +250,18 @@ class GuiTerminalView:
         return self.font;
 
     def _reload_preferences(self,pygame):
-        self.preferences=load_preferences().normalized(); self._reload_theme(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame);
-        pygame.display.set_mode((width,height),self._flags); self._apply_window_properties(pygame); self._update_size(pygame,self.font,self.header_height);
+        previous=self.preferences; surface=pygame.display.get_surface(); previous_size=surface.get_size() if surface is not None else None;
+        self.preferences=load_preferences().normalized(); self._reload_theme(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame); target_size=(width,height);
+        geometry_changed=previous_size!=target_size; opacity_changed=float(previous.dropdown.opacity)!=float(self.preferences.dropdown.opacity); position_changed=str(previous.dropdown.position)!=str(self.preferences.dropdown.position);
+        if geometry_changed: pygame.display.set_mode(target_size,self._flags);
+        if geometry_changed or opacity_changed or position_changed: self._apply_window_properties(pygame);
+        self._update_size(pygame,self.font,self.header_height);
 
     def _open_preferences(self):
         if self._preferences_process is not None and self._preferences_process.poll() is None: return;
         executable=shutil.which("sumterminal");
         command=[executable,"--preferences"] if executable else [sys.executable,"-m","sumterminal","--preferences"];
+        self._preferences_reload_pending=False;
         if self.drop_down: self._set_visible(False);
         try: self._preferences_process=subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);
         except OSError:
@@ -400,13 +406,15 @@ class GuiTerminalView:
             while self.running:
                 clock.tick(60);
                 if self._preferences_finished:
-                    self._preferences_finished=False; self._reload_preferences(pygame); self._set_visible(True);
+                    self._preferences_finished=False; self._preferences_process=None; self._set_visible(True); self._reload_preferences(pygame); self._preferences_reload_pending=False;
                 if self.ipc is not None:
                     for command in self.ipc.pending():
                         if command=="toggle": self.toggle_visible();
                         elif command=="show": self._set_visible(True);
                         elif command=="hide": self._set_visible(False);
-                        elif command=="reload": self._reload_preferences(pygame);
+                        elif command=="reload":
+                            if self._preferences_process is not None and self._preferences_process.poll() is None: self._preferences_reload_pending=True;
+                            else: self._reload_preferences(pygame);
                         elif command=="quit": self.running=False;
                 for event in pygame.event.get():
                     if event.type==pygame.QUIT: self.running=False;

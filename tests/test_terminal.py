@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a6" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a7" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -373,3 +373,31 @@ def test_user_sum_theme_is_available_to_terminal(tmp_path,monkeypatch):
     assert "Ocean Test" in available_terminal_themes();
     assert canonical_theme_name("ocean test",strict=True)=="Ocean Test";
     assert resolve_theme("Ocean Test").viewer_bg==(1,2,3);
+
+
+def test_preferences_reload_keeps_existing_display_when_geometry_is_unchanged(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    prefs=TerminalPreferences(); prefs.dropdown.width=100; prefs.dropdown.height=45;
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs,drop_down=True);
+    class Surface:
+        @staticmethod
+        def get_size(): return (2000,450);
+    calls=[];
+    class Display:
+        @staticmethod
+        def get_surface(): return Surface();
+        @staticmethod
+        def get_desktop_sizes(): return [(2000,1000)];
+        @staticmethod
+        def set_mode(size,flags): calls.append((size,flags)); return Surface();
+    fake=SimpleNamespace(display=Display());
+    monkeypatch.setattr("sumterminal.gui.load_preferences",lambda:prefs);
+    monkeypatch.setattr(view,"_reload_theme",lambda:None);
+    monkeypatch.setattr(view,"_make_fonts",lambda pygame:None);
+    monkeypatch.setattr(view,"_update_size",lambda *args:None);
+    window_calls=[]; monkeypatch.setattr(view,"_apply_window_properties",lambda pygame:window_calls.append(True));
+    view._reload_preferences(fake);
+    assert calls==[];
+    assert window_calls==[];

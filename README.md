@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a6
+# sumTerminal 0.1.0a7
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -85,13 +85,11 @@ Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on 
 - opacity (default `94%`);
 - top/bottom position and focus-loss behavior in the configuration model.
 
-The graphical preference view exposes the SUM theme, default shell command, font family/name, font size, shortcut, height, width and opacity.  The default shell is `sumbash`; values such as `bash -l`, `zsh`, `python` or an explicit executable/argument line are also accepted.  Changing the default shell affects subsequently created tabs and future terminal launches; it does not replace shells already running in existing tabs. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
+The graphical preference view exposes the SUM theme, default shell command, font family/name, font size, shortcut, height, width and opacity.  The default shell is `sumbash`; values such as `bash -l`, `zsh`, `python` or an explicit executable/argument line are also accepted.  Changing the default shell affects subsequently created tabs and future terminal launches; it does not replace shells already running in existing tabs. Applying preferences preserves the PTY and `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.  When Preferences is opened by a running drop-down, display changes are deferred until that Preferences process closes so SDL does not recreate a hidden window while another Pygame window is active.
 
 When Preferences is opened from the drop-down, the terminal window is hidden
 while the preference window is active and restored afterwards.  The PTY and
-shell remain alive.  Display recreation on Apply uses the normal Pygame
-display API instead of mutating the experimental `_sdl2.Window.size` path,
-which avoids crashes seen with some distro Pygame/SDL builds.
+shell remain alive.  The terminal now avoids unconditional display recreation when Preferences closes.  Theme/font-only changes keep the existing SDL window; `pygame.display.set_mode()` is used only when the requested geometry actually changed.  This avoids the hidden-window recreation path that can crash in some distro Pygame/SDL combinations.
 
 ## Graphical terminal screen
 
