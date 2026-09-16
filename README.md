@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a4
+# sumTerminal 0.1.0a5
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -42,6 +42,20 @@ Open preferences with:
 sumterminal --preferences
 ```
 
+## Tabs
+
+The graphical frontend owns multiple independent PTY sessions in one window.
+A new tab starts the shell configured in Preferences and keeps the existing
+tabs running in the background.
+
+```text
+Ctrl+Shift+T    new tab
+```
+
+Tabs can also be selected with the mouse, closed with the `×` on the tab, or
+created with the `+` button.  Background tabs continue to drain their PTYs so
+long-running commands do not block merely because another tab is visible.
+
 One-shot font overrides are also available:
 
 ```sh
@@ -61,7 +75,7 @@ Current drop-down preferences are persisted in `~/.config/sum/terminal.toml` on 
 - opacity (default `94%`);
 - top/bottom position and focus-loss behavior in the configuration model.
 
-The graphical preference view exposes font family/name, font size, shortcut, height, width and opacity. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
+The graphical preference view exposes the default shell command, font family/name, font size, shortcut, height, width and opacity.  The default shell is `sumbash`; values such as `bash -l`, `zsh`, `python` or an explicit executable/argument line are also accepted.  Changing the default shell affects subsequently created tabs and future terminal launches; it does not replace shells already running in existing tabs. Applying preferences hot-reloads the active drop-down font/geometry without restarting the PTY or `sumbash`, and also asks `sumKeyboard` to refresh the global shortcut where the desktop backend supports it.
 
 When Preferences is opened from the drop-down, the terminal window is hidden
 while the preference window is active and restored afterwards.  The PTY and
@@ -120,7 +134,7 @@ Still later slices:
 - Windows ConPTY;
 - native Windows global-hotkey registration;
 - Android terminal presentation;
-- tabs and split panes;
+- split panes;
 - saved session/SSH/serial profiles;
 - embedding the same terminal view in `sumIDE`;
 - broader VT/xterm compatibility for highly specialised full-screen applications.

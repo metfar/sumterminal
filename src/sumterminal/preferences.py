@@ -21,6 +21,7 @@
 #  
 import shutil;
 import os;
+import shlex;
 import warnings;
 
 from sumkeyboard.hotkeys import install_global_shortcut, normalize_shortcut;
@@ -52,7 +53,7 @@ def show_preferences(preferences=None):
         from sumgui.easy import app, button, label, slider, start, window;
         from sumgui.widgets import TextInput;
     except ImportError as exc: raise RuntimeError("sumTerminal preferences require sumGUI/Pygame") from exc;
-    current=window("SUM Terminal Preferences",width=760,height=680,base_width=760,base_height=680,theme=value.general.theme,font_name=value.general.font_name,font_size=18);
+    current=window("SUM Terminal Preferences",width=760,height=780,base_width=760,base_height=780,theme=value.general.theme,font_name=value.general.font_name,font_size=18);
     class ShortcutInput(TextInput):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs); self.capturing=False; self._before=self.value();
@@ -75,21 +76,26 @@ def show_preferences(preferences=None):
             if self.capturing: return True;
             return super().handle_event(event);
     label("SUM Terminal Preferences",28,18,650,42,font_size=26,bold=True);
-    label("Appearance",28,72,650,34,font_size=20,bold=True);
-    label("Font",28,116,200,34); font_name=current.add(TextInput(current.rect(270,110,440,42),current.font,text=value.general.font_name,placeholder="monospace / DejaVu Sans Mono / ...",max_length=96,theme=current.theme));
-    label("Font size",28,170,200,34); font_size=slider("{} pt".format(value.general.font_size),270,162,440,54,minimum=8,maximum=48,value=value.general.font_size,step=1);
-    label("Drop-down",28,232,650,34,font_size=20,bold=True);
-    label("Shortcut",28,278,230,34); shortcut=current.add(ShortcutInput(current.rect(270,272,440,42),current.font,text=value.dropdown.shortcut,placeholder="Click, then press shortcut",max_length=48,theme=current.theme));
-    label("Height",28,334,190,34); height=slider("{}%".format(value.dropdown.height),270,326,440,54,minimum=10,maximum=100,value=value.dropdown.height,step=1);
-    label("Width",28,394,190,34); width=slider("{}%".format(value.dropdown.width),270,386,440,54,minimum=20,maximum=100,value=value.dropdown.width,step=1);
-    label("Opacity",28,454,190,34); opacity=slider("{}%".format(int(round(value.dropdown.opacity*100))),270,446,440,54,minimum=20,maximum=100,value=value.dropdown.opacity*100,step=1);
-    status=label("Ctrl+F12 is the default global toggle.",28,522,684,46,font_size=16);
+    label("General",28,72,650,34,font_size=20,bold=True);
+    label("Default shell",28,116,200,34); shell=current.add(TextInput(current.rect(270,110,440,42),current.font,text=value.general.shell,placeholder="sumbash / bash -l / zsh / pwsh ...",max_length=160,theme=current.theme));
+    label("Appearance",28,172,650,34,font_size=20,bold=True);
+    label("Font",28,216,200,34); font_name=current.add(TextInput(current.rect(270,210,440,42),current.font,text=value.general.font_name,placeholder="monospace / DejaVu Sans Mono / ...",max_length=96,theme=current.theme));
+    label("Font size",28,270,200,34); font_size=slider("{} pt".format(value.general.font_size),270,262,440,54,minimum=8,maximum=48,value=value.general.font_size,step=1);
+    label("Drop-down",28,332,650,34,font_size=20,bold=True);
+    label("Shortcut",28,378,230,34); shortcut=current.add(ShortcutInput(current.rect(270,372,440,42),current.font,text=value.dropdown.shortcut,placeholder="Click, then press shortcut",max_length=48,theme=current.theme));
+    label("Height",28,434,190,34); height=slider("{}%".format(value.dropdown.height),270,426,440,54,minimum=10,maximum=100,value=value.dropdown.height,step=1);
+    label("Width",28,494,190,34); width=slider("{}%".format(value.dropdown.width),270,486,440,54,minimum=20,maximum=100,value=value.dropdown.width,step=1);
+    label("Opacity",28,554,190,34); opacity=slider("{}%".format(int(round(value.dropdown.opacity*100))),270,546,440,54,minimum=20,maximum=100,value=value.dropdown.opacity*100,step=1);
+    status=label("Ctrl+F12 toggles the drop-down. Ctrl+Shift+T opens a new tab.",28,620,684,46,font_size=16);
     def save(close=False):
         try:
-            value.general.font_name=str(font_name.value() or "monospace").strip(); value.general.font_size=int(round(font_size.value)); value.dropdown.shortcut=normalize_shortcut(shortcut.value()); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
+            shell_value=str(shell.value() or "sumbash").strip();
+            if not shell_value: shell_value="sumbash";
+            if shell_value.casefold()!="sumbash" and not shlex.split(shell_value): raise ValueError("default shell command is empty");
+            value.general.shell=shell_value; value.general.font_name=str(font_name.value() or "monospace").strip(); value.general.font_size=int(round(font_size.value)); value.dropdown.shortcut=normalize_shortcut(shortcut.value()); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
             send_command("reload"); status.text="Saved {} — {}".format(path,result.detail);
             if close: app().running=False;
         except Exception as exc:
             status.text="Could not apply preferences: {}".format(exc);
-    button("APPLY",310,600,180,54,do=lambda:save(False)); button("SAVE && CLOSE",510,600,200,54,do=lambda:save(True));
+    button("APPLY",310,700,180,54,do=lambda:save(False)); button("SAVE && CLOSE",510,700,200,54,do=lambda:save(True));
     start(); return 0;

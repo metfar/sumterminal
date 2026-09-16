@@ -68,6 +68,13 @@ def _launcher_command(*extra):
     return [executable,*extra] if executable else [sys.executable,"-m","sumterminal",*extra];
 
 
+def _configured_shell_command(preferences):
+    text=str(preferences.general.shell or "sumbash").strip();
+    if not text or text.casefold()=="sumbash": return default_shell_command();
+    command=shlex.split(text);
+    return command or default_shell_command();
+
+
 def _toggle_dropdown():
     if send_command("toggle"): return 0;
     command=_launcher_command("--drop-down");
@@ -96,7 +103,7 @@ def main(argv=None):
     preferences.normalized();
     try:
         if args.print_default_shell:
-            print(" ".join(shlex.quote(value) for value in default_shell_command())); return 0;
+            print(" ".join(shlex.quote(value) for value in _configured_shell_command(preferences))); return 0;
         if args.toggle: return _toggle_dropdown();
         if args.install: return _install(preferences);
         if args.uninstall:

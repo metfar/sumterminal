@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a4" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a5" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -154,6 +154,7 @@ def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
     assert loaded.dropdown.opacity==pytest.approx(0.94);
     assert loaded.general.font_name=="monospace";
     assert loaded.general.font_size==18;
+    assert loaded.general.shell=="sumbash";
 
 
 def test_terminal_screen_cursor_sgr_and_title():
@@ -252,3 +253,69 @@ def test_gui_font_metrics_fall_back_to_monospace_for_proportional_font():
     assert view.cell_height==20;
     assert view.glyph_height==16;
     assert view.glyph_offset_y==2;
+
+
+def test_preferences_persist_default_shell(tmp_path):
+    from sumterminal.config import TerminalPreferences, load_preferences, save_preferences;
+    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); value.general.shell="bash -l"; save_preferences(value,path); loaded=load_preferences(path);
+    assert loaded.general.shell=="bash -l";
+
+
+def test_cli_print_default_shell_uses_preferences(monkeypatch,capsys):
+    from sumterminal import cli;
+    from sumterminal.config import TerminalPreferences;
+    value=TerminalPreferences(); value.general.shell="python -q";
+    monkeypatch.setattr(cli,"load_preferences",lambda:value);
+    assert cli.main(["--print-default-shell"])==0;
+    assert capsys.readouterr().out.strip()=="python -q";
+
+
+def test_gui_preferred_shell_command_uses_preference():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    prefs=TerminalPreferences(); prefs.general.shell="bash -l";
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs);
+    assert view._preferred_shell_command()==["bash","-l"];
+    prefs.general.shell="sumbash";
+    assert view._preferred_shell_command() is None;
+
+
+def test_ctrl_shift_t_creates_new_tab(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    fake_pygame=SimpleNamespace(KMOD_CTRL=1,KMOD_SHIFT=2,K_F12=10,K_COMMA=11,K_t=12);
+    event=SimpleNamespace(key=12,mod=3); session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=TerminalPreferences()); called=[];
+    monkeypatch.setattr(view,"_new_tab",lambda:called.append(True));
+    assert view._key_bytes(fake_pygame,event)==b"";
+    assert called==[True];
+
+
+def test_tab_label_uses_shell_name():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(24,80),argv=("/usr/bin/sumbash",)); view=GuiTerminalView(session,preferences=TerminalPreferences());
+    assert view._tab_label(view.active_tab,0)=="sumbash";
+
+
+@pytest.mark.skipif(os.name!="posix",reason="POSIX PTY test")
+def test_new_tab_starts_configured_default_shell(tmp_path):
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    initial=TerminalSession(command=["/bin/sh"],cwd=str(tmp_path)).start(); prefs=TerminalPreferences(); prefs.general.shell="/bin/sh"; view=GuiTerminalView(initial,preferences=prefs);
+    try:
+        tab=view._new_tab();
+        assert tab is not None;
+        assert view.tab_count==2;
+        assert tuple(view.session.argv)==("/bin/sh",);
+        view.session.write(b"echo TAB-OK; exit\n");
+        output=_collect(view.session);
+        assert b"TAB-OK" in output;
+    finally:
+        for item in list(view._tabs):
+            if item.session.poll() is None: item.session.terminate();
+            try: item.session.wait(timeout=1.0);
+            except Exception: pass;
+            item.session.close();
