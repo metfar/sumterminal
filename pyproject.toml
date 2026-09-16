@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sumterminal"
-version = "0.1.0a1"
-description = "Reusable terminal-session engine and standalone terminal host for the SUM ecosystem."
+version = "0.1.0a2"
+description = "SUM terminal/session engine with graphical, drop-down and host frontends."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "GPL-2.0-or-later" }
+license = "GPL-2.0-or-later"
 authors = [{ name = "William Martinez Bas", email = "metfar@gmail.com" }]
-dependencies = ["sumfsa>=0.1.0a1", "sumio>=0.1.0a1", "sumbash>=0.1.0a15"]
+dependencies = ["sumfsa>=0.1.0a1", "sumio>=0.1.0a1", "sumbash>=0.1.0a15", "sumgui>=0.2.0a24", "sumkeyboard>=0.1.0a2"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",

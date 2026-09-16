@@ -19,11 +19,14 @@
 #  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 #  MA 02110-1301, USA.
 #  
+from .config import DropdownPreferences, GeneralPreferences, TerminalPreferences, config_path, load_preferences, save_preferences;
 from .decoder import TerminalDecoder;
 from .errors import SessionStateError, TerminalError, UnsupportedPlatformError;
 from .model import SessionInfo, SessionState, TerminalEvent, TerminalSize;
+from .screen import Cell, TerminalScreen;
 from .session import TerminalSession, default_shell_command;
 from .view import HostTerminalView;
+from .gui import GuiTerminalView;
 
-__version__="0.1.0a1";
-__all__=["HostTerminalView","SessionInfo","SessionState","SessionStateError","TerminalDecoder","TerminalError","TerminalEvent","TerminalSession","TerminalSize","UnsupportedPlatformError","default_shell_command"];
+__version__="0.1.0a2";
+__all__=["Cell","DropdownPreferences","GeneralPreferences","GuiTerminalView","HostTerminalView","SessionInfo","SessionState","SessionStateError","TerminalDecoder","TerminalError","TerminalEvent","TerminalPreferences","TerminalScreen","TerminalSession","TerminalSize","UnsupportedPlatformError","config_path","default_shell_command","load_preferences","save_preferences"];

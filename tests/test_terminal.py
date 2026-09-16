@@ -128,4 +128,65 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a1" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a2" in capsys.readouterr().out;
+
+
+def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
+    from sumterminal.config import TerminalPreferences, load_preferences, save_preferences;
+    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); save_preferences(value,path); loaded=load_preferences(path);
+    assert loaded.general.frontend=="gui";
+    assert loaded.dropdown.shortcut=="Ctrl+F12";
+    assert loaded.dropdown.height==45;
+    assert loaded.dropdown.width==100;
+    assert loaded.dropdown.opacity==pytest.approx(0.94);
+
+
+def test_terminal_screen_cursor_sgr_and_title():
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(4,12); screen.feed("abc\x1b[31mR\x1b[0m\r\nnext\x1b]0;demo\x07");
+    assert screen.text_lines()[0].startswith("abcR");
+    assert screen.lines[0][3].fg==(205,0,0);
+    assert screen.text_lines()[1].startswith("next");
+    assert screen.title=="demo";
+
+
+def test_terminal_screen_alternate_buffer_restores_primary():
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(3,8); screen.feed("main"); screen.feed("\x1b[?1049h"); screen.feed("alt");
+    assert screen.text_lines()[0].startswith("alt");
+    screen.feed("\x1b[?1049l");
+    assert screen.text_lines()[0].startswith("main");
+
+
+def test_cli_gui_reports_missing_frontend(monkeypatch,capsys):
+    from sumterminal import cli;
+    monkeypatch.setattr(cli.GuiTerminalView,"available",staticmethod(lambda:False));
+    code=cli.main(["--gui","--",sys.executable,"-c","print('x')"]);
+    assert code==1;
+    assert "graphical frontend requested" in capsys.readouterr().err;
+
+
+def test_dropdown_geometry_uses_preferences():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    class Display:
+        @staticmethod
+        def get_desktop_sizes(): return [(2000,1000)];
+    fake_pygame=SimpleNamespace(display=Display());
+    session=SimpleNamespace(size=TerminalSize(24,80)); prefs=TerminalPreferences(); prefs.dropdown.width=80; prefs.dropdown.height=40;
+    view=GuiTerminalView(session,preferences=prefs,drop_down=True);
+    assert view._geometry(fake_pygame)==(1600,400,200,0);
+
+
+def test_dropdown_ipc_toggle_roundtrip(tmp_path):
+    import time;
+    from sumterminal.ipc import DropdownIPCServer, send_command;
+    path=tmp_path/"terminal.sock"; server=DropdownIPCServer(path); assert server.start() is True;
+    try:
+        assert send_command("toggle",path=path,timeout=1.0) is True;
+        deadline=time.monotonic()+1.0; values=[];
+        while time.monotonic()<deadline and not values:
+            values=server.pending(); time.sleep(0.01);
+        assert values==["toggle"];
+    finally: server.close();
