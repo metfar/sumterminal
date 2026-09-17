@@ -226,7 +226,9 @@ class GuiTerminalView:
         return width,height;
 
     def _set_visible(self,value):
-        self.visible=bool(value); self._force_redraw=True; window=self._sdl_window();
+        requested=bool(value);
+        if requested==self.visible: return;
+        self.visible=requested; self._force_redraw=True; window=self._sdl_window();
         if window is not None:
             try:
                 if self.visible:
@@ -267,7 +269,10 @@ class GuiTerminalView:
         self.toolbar_height=max(28,self.header_font.get_linesize()+8);
         self.tabbar_height=max(28,self.header_font.get_linesize()+8);
         self.header_height=self.toolbar_height+self.tabbar_height;
-        self.cell_width=max(1,self.font.size("M")[0]);
+        sample="iMW0@#_";
+        widths=[self.font.size(char)[0] for char in sample];
+        if self.bold_font is not None: widths.extend(self.bold_font.size(char)[0] for char in sample);
+        self.cell_width=max(1,max(widths));
         self.cell_height=max(1,self.font.get_linesize());
         self.glyph_height=max(1,self.font.get_height());
         self.glyph_offset_y=max(0,(self.cell_height-self.glyph_height)//2);
@@ -286,10 +291,8 @@ class GuiTerminalView:
         executable=shutil.which("sumterminal");
         command=[executable,"--preferences"] if executable else [sys.executable,"-m","sumterminal","--preferences"];
         self._preferences_reload_pending=False;
-        if self.drop_down: self._set_visible(False);
         try: self._preferences_process=subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);
-        except OSError:
-            self._set_visible(True); raise;
+        except OSError: raise;
         def wait_preferences():
             try: self._preferences_process.wait();
             except Exception: pass;
@@ -401,24 +404,20 @@ class GuiTerminalView:
     def _draw_screen(self,pygame,surface,font,theme,header_height,cell_w,cell_h):
         y0=header_height;
         for row,line in enumerate(self.screen_model.lines):
-            x=0; index=0;
-            while index<len(line):
-                cell=line[index]; fg,bg=(cell.bg,cell.fg) if cell.inverse else (cell.fg,cell.bg); bold=cell.bold; underline=cell.underline; chars=[cell.char]; end=index+1;
-                while end<len(line):
-                    other=line[end]; ofg,obg=(other.bg,other.fg) if other.inverse else (other.fg,other.bg);
-                    if (ofg,obg,other.bold,other.underline)!=(fg,bg,bold,underline): break;
-                    chars.append(other.char); end+=1;
-                text="".join(chars); width=(end-index)*cell_w; shown_fg=_display_fg(self.screen_model,fg,bold);
-                if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y0+row*cell_h,width,cell_h));
-                renderer=self.bold_font if bold and self.bold_font is not None else font; rendered=renderer.render(text,True,shown_fg); surface.blit(rendered,(x,y0+row*cell_h+self.glyph_offset_y));
-                if underline: pygame.draw.line(surface,shown_fg,(x,y0+(row+1)*cell_h-2),(x+width,y0+(row+1)*cell_h-2),1);
-                x+=width; index=end;
+            y=y0+row*cell_h;
+            for column,cell in enumerate(line):
+                x=column*cell_w; fg,bg=(cell.bg,cell.fg) if cell.inverse else (cell.fg,cell.bg); shown_fg=_display_fg(self.screen_model,fg,cell.bold);
+                if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y,cell_w,cell_h));
+                char=cell.char or " ";
+                if char!=" ":
+                    renderer=self.bold_font if cell.bold and self.bold_font is not None else font; rendered=renderer.render(char,True,shown_fg); surface.blit(rendered,(x,y+self.glyph_offset_y));
+                if cell.underline: pygame.draw.line(surface,shown_fg,(x,y+cell_h-2),(x+cell_w,y+cell_h-2),1);
         if self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
             col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h+self.glyph_offset_y; cursor_h=min(cell_h,self.glyph_height); pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cursor_h));
-            try: char=self.screen_model.lines[self.screen_model.row][col].char;
-            except (IndexError,AttributeError): char=" ";
+            try: cell=self.screen_model.lines[self.screen_model.row][col]; char=cell.char;
+            except (IndexError,AttributeError): cell=None; char=" ";
             if char and char!=" ":
-                rendered=font.render(char,True,self.screen_model.default_bg); surface.blit(rendered,(x,y));
+                renderer=self.bold_font if cell is not None and cell.bold and self.bold_font is not None else font; rendered=renderer.render(char,True,self.screen_model.default_bg); surface.blit(rendered,(x,y));
 
     def _service_sessions(self):
         running=[]; mapping={};
@@ -479,7 +478,7 @@ class GuiTerminalView:
             while self.running:
                 clock.tick(self.poll_hz);
                 if self._preferences_finished:
-                    self._preferences_finished=False; self._preferences_process=None; self._set_visible(True); self._reload_preferences(pygame); self._preferences_reload_pending=False;
+                    self._preferences_finished=False; self._preferences_process=None; self._reload_preferences(pygame); self._preferences_reload_pending=False;
                 if self.ipc is not None:
                     for command in self.ipc.pending():
                         if command=="toggle": self.toggle_visible();

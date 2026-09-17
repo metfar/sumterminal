@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a10" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a11" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -627,3 +627,45 @@ def test_gui_key_trace_reports_application_mode_and_encoded_bytes(capsys):
     trace=capsys.readouterr().err;
     assert "app_cursor=True" in trace;
     assert "send=1b 4f 41" in trace;
+
+
+def test_set_visible_is_noop_when_visibility_does_not_change(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=TerminalPreferences());
+    monkeypatch.setattr(view,"_sdl_window",lambda:(_ for _ in ()).throw(AssertionError("native SDL window should not be touched")));
+    view.visible=True; view._set_visible(True); assert view.visible is True;
+
+
+def test_font_metrics_reserve_space_for_bold_glyphs():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    class FakeFont:
+        def __init__(self,bold=False): self.bold=bold;
+        def size(self,text): return ((9 if self.bold else 8)*len(text),16);
+        def get_linesize(self): return 18;
+        def get_height(self): return 16;
+    class FontAPI:
+        @staticmethod
+        def match_font(name,bold=False): return None;
+        @staticmethod
+        def SysFont(name,size,bold=False): return FakeFont(bold);
+        @staticmethod
+        def Font(path,size): return FakeFont(False);
+    fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake); assert view.cell_width==9;
+
+
+def test_monospace_font_filter_keeps_only_fixed_width_names():
+    from types import SimpleNamespace;
+    from sumterminal.preferences import _monospace_fonts;
+    class FakeFont:
+        def __init__(self,name): self.name=name;
+        def size(self,text): return ((8 if self.name!="prop" or text=="i" else 11)*len(text),16);
+    class FontAPI:
+        @staticmethod
+        def get_fonts(): return ["mono","prop"];
+        @staticmethod
+        def SysFont(name,size): return FakeFont(name);
+    result=_monospace_fonts(SimpleNamespace(font=FontAPI()),"mono"); assert "mono" in result; assert "prop" not in result;
