@@ -29,6 +29,7 @@ import threading;
 import warnings;
 
 from .config import load_preferences;
+from .crashlog import crash_log_path, log_exception;
 from .ipc import DropdownIPCServer;
 from .input import TerminalInputEncoder;
 from .model import TerminalSize;
@@ -103,7 +104,53 @@ class GuiTerminalView:
         self._tab_close_rects=[];
         self.sum_theme=resolve_theme(self.preferences.general.theme);
         self.theme=None;
+        self._runtime_error=None;
+        self._runtime_error_context="";
+        self._runtime_error_log=str(crash_log_path());
+        self._last_error_signature=None;
+        self._last_error_count=0;
         self._apply_theme_to_screens();
+
+    def _record_runtime_error(self,context,exc):
+        signature=(str(context),type(exc).__name__,str(exc));
+        if signature==self._last_error_signature:
+            self._last_error_count+=1;
+        else:
+            self._last_error_signature=signature;
+            self._last_error_count=1;
+        self._runtime_error=(type(exc).__name__,str(exc));
+        self._runtime_error_context=str(context);
+        self._runtime_error_log=str(log_exception(context,exc));
+        self._force_redraw=True;
+        self._trace("ERROR context={} type={} message={}".format(context,type(exc).__name__,exc));
+        return False;
+
+    def _dismiss_runtime_error(self):
+        self._runtime_error=None;
+        self._runtime_error_context="";
+        self._force_redraw=True;
+        return True;
+
+    def _draw_runtime_error_overlay(self,pygame,surface):
+        if self._runtime_error is None:
+            return False;
+        error_type,message=self._runtime_error;
+        message=str(message or "").replace("\n"," ").strip();
+        text="{} in {}: {}".format(error_type,self._runtime_error_context,message or "unexpected error");
+        hint="Esc dismisses this message; details: {}".format(self._runtime_error_log);
+        width=max(1,int(surface.get_width()));
+        line_height=max(18,int(getattr(self.header_font,"get_linesize",lambda:18)()));
+        box_height=min(surface.get_height(),line_height*2+10);
+        top=max(0,surface.get_height()-box_height);
+        pygame.draw.rect(surface,self.theme.error,(0,top,width,box_height));
+        renderer=self.header_font or self.font;
+        if renderer is not None:
+            max_chars=max(8,int(width/max(1,self.cell_width))-2);
+            line1=renderer.render(text[:max_chars],True,self.theme.button_text);
+            line2=renderer.render(hint[:max_chars],True,self.theme.button_text);
+            surface.blit(line1,(6,top+3));
+            surface.blit(line2,(6,top+3+line_height));
+        return True;
 
     def _apply_theme_to_screens(self):
         foreground,background,_cursor,_selection_bg,_selection_text=terminal_colors(self.sum_theme);
@@ -486,6 +533,86 @@ class GuiTerminalView:
                 break;
             self._close_tab(index);
 
+    def _handle_pygame_event(self,pygame,event):
+        if event.type==pygame.KEYDOWN and self._runtime_error is not None and event.key==pygame.K_ESCAPE:
+            return self._dismiss_runtime_error();
+        if event.type==pygame.QUIT:
+            self.running=False;
+            return True;
+        if event.type==pygame.VIDEORESIZE:
+            self._update_size(pygame,self.font,self.header_height);
+            self._force_redraw=True;
+            return True;
+        if event.type==getattr(pygame,"MOUSEWHEEL",-999):
+            if self.screen_model.mouse_tracking and self.screen_model.mouse_sgr:
+                button=4 if int(getattr(event,"y",0))>0 else 5;
+                synthetic=type("WheelEvent",(),{"button":button,"pos":pygame.mouse.get_pos()})();
+                data=self._mouse_bytes(pygame,synthetic,True);
+                if data and self.running: self.session.write(data);
+            else:
+                amount=int(getattr(event,"y",0) or 0);
+                self._scroll_view(amount*3);
+            return True;
+        if event.type==pygame.MOUSEBUTTONDOWN:
+            handled=event.button==1 and self._handle_header_click(event.pos);
+            if not handled:
+                data=self._mouse_bytes(pygame,event,True);
+                if data and self.running: self.session.write(data);
+                elif not hasattr(pygame,"MOUSEWHEEL") and event.button==4: self._scroll_view(3);
+                elif not hasattr(pygame,"MOUSEWHEEL") and event.button==5: self._scroll_view(-3);
+            return True;
+        if event.type==pygame.MOUSEBUTTONUP:
+            data=self._mouse_bytes(pygame,event,False);
+            if data and self.running: self.session.write(data);
+            return True;
+        if event.type==pygame.MOUSEMOTION:
+            data=self._mouse_motion_bytes(pygame,event);
+            if data and self.running: self.session.write(data);
+            return True;
+        if event.type==pygame.KEYDOWN:
+            data=self._key_bytes(pygame,event);
+            if data and self.running: self.session.write(data);
+            return True;
+        if event.type==pygame.TEXTINPUT:
+            modifiers=pygame.key.get_mods();
+            if event.text and self.running and not (modifiers & (pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_GUI)):
+                self.session.write(event.text.encode("utf-8"));
+            return True;
+        if self.drop_down and self.preferences.dropdown.hide_on_focus_loss and event.type==getattr(pygame,"WINDOWFOCUSLOST",-999):
+            self._set_visible(False);
+            return True;
+        return False;
+
+    def _render_frame(self,pygame):
+        signature=self._render_signature();
+        redraw=self._force_redraw or signature!=self._last_render_signature;
+        if not self.visible or not redraw:
+            return False;
+        surface=pygame.display.get_surface();
+        theme=self.theme;
+        surface.fill(theme.bg);
+        cell_w,cell_h=self._update_size(pygame,self.font,self.header_height);
+        self._draw_header(pygame,surface,self.header_font,theme,self.header_height);
+        pygame.draw.rect(surface,self.screen_model.default_bg,(0,self.header_height,surface.get_width(),max(0,surface.get_height()-self.header_height)));
+        self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h);
+        self._draw_runtime_error_overlay(pygame,surface);
+        pygame.display.flip();
+        self._last_render_signature=self._render_signature();
+        self._force_redraw=False;
+        return True;
+
+    def _render_emergency_frame(self,pygame):
+        try:
+            surface=pygame.display.get_surface();
+            if surface is None: return False;
+            surface.fill((0,0,0));
+            self._draw_runtime_error_overlay(pygame,surface);
+            pygame.display.flip();
+            self._force_redraw=False;
+            return True;
+        except Exception:
+            return False;
+
     def run(self):
         try:
             _prepare_pygame_runtime();
@@ -501,54 +628,60 @@ class GuiTerminalView:
         try:
             while self.running:
                 clock.tick(self.poll_hz);
-                if self._preferences_finished:
-                    self._preferences_finished=False; self._preferences_process=None; self._reload_preferences(pygame); self._preferences_reload_pending=False;
+                try:
+                    if self._preferences_finished:
+                        self._preferences_finished=False;
+                        self._preferences_process=None;
+                        self._reload_preferences(pygame);
+                        self._preferences_reload_pending=False;
+                except Exception as exc:
+                    self._record_runtime_error("preferences reload",exc);
                 if self.ipc is not None:
-                    for command in self.ipc.pending():
-                        if command=="toggle": self.toggle_visible();
-                        elif command=="show": self._set_visible(True);
-                        elif command=="hide": self._set_visible(False);
-                        elif command=="reload":
-                            if self._preferences_process is not None and self._preferences_process.poll() is None: self._preferences_reload_pending=True;
-                            else: self._reload_preferences(pygame);
-                        elif command=="quit": self.running=False;
-                for event in pygame.event.get():
-                    if event.type==pygame.QUIT: self.running=False;
-                    elif event.type==pygame.VIDEORESIZE: self._update_size(pygame,self.font,self.header_height); self._force_redraw=True;
-                    elif event.type==getattr(pygame,"MOUSEWHEEL",-999):
-                        if self.screen_model.mouse_tracking and self.screen_model.mouse_sgr:
-                            button=4 if int(getattr(event,"y",0))>0 else 5; synthetic=type("WheelEvent",(),{"button":button,"pos":pygame.mouse.get_pos()})(); data=self._mouse_bytes(pygame,synthetic,True);
-                            if data and self.running: self.session.write(data);
-                        else:
-                            amount=int(getattr(event,"y",0) or 0); self._scroll_view(amount*3);
-                    elif event.type==pygame.MOUSEBUTTONDOWN:
-                        handled=event.button==1 and self._handle_header_click(event.pos);
-                        if not handled:
-                            data=self._mouse_bytes(pygame,event,True);
-                            if data and self.running: self.session.write(data);
-                            elif not hasattr(pygame,"MOUSEWHEEL") and event.button==4: self._scroll_view(3);
-                            elif not hasattr(pygame,"MOUSEWHEEL") and event.button==5: self._scroll_view(-3);
-                    elif event.type==pygame.MOUSEBUTTONUP:
-                        data=self._mouse_bytes(pygame,event,False);
-                        if data and self.running: self.session.write(data);
-                    elif event.type==pygame.MOUSEMOTION:
-                        data=self._mouse_motion_bytes(pygame,event);
-                        if data and self.running: self.session.write(data);
-                    elif event.type==pygame.KEYDOWN:
-                        data=self._key_bytes(pygame,event);
-                        if data and self.running: self.session.write(data);
-                    elif event.type==pygame.TEXTINPUT:
-                        modifiers=pygame.key.get_mods();
-                        if event.text and self.running and not (modifiers & (pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_GUI)): self.session.write(event.text.encode("utf-8"));
-                    elif self.drop_down and self.preferences.dropdown.hide_on_focus_loss and event.type==getattr(pygame,"WINDOWFOCUSLOST",-999): self._set_visible(False);
-                self._service_sessions();
-                if not self._tabs: self.running=False; continue;
+                    try:
+                        commands=self.ipc.pending();
+                    except Exception as exc:
+                        self._record_runtime_error("dropdown IPC",exc);
+                        commands=[];
+                    for command in commands:
+                        try:
+                            if command=="toggle": self.toggle_visible();
+                            elif command=="show": self._set_visible(True);
+                            elif command=="hide": self._set_visible(False);
+                            elif command=="reload":
+                                if self._preferences_process is not None and self._preferences_process.poll() is None: self._preferences_reload_pending=True;
+                                else: self._reload_preferences(pygame);
+                            elif command=="quit": self.running=False;
+                        except Exception as exc:
+                            self._record_runtime_error("dropdown command {}".format(command),exc);
+                try:
+                    events=pygame.event.get();
+                except Exception as exc:
+                    self._record_runtime_error("pygame event queue",exc);
+                    events=[];
+                for event in events:
+                    try:
+                        self._handle_pygame_event(pygame,event);
+                    except Exception as exc:
+                        self._record_runtime_error("input event",exc);
+                try:
+                    self._service_sessions();
+                except Exception as exc:
+                    self._record_runtime_error("PTY/session service",exc);
+                if not self._tabs:
+                    self.running=False;
+                    continue;
                 exit_code=int(self.active_tab.exit_code or 0);
-                if self.screen_model.title!=self._last_title:
-                    pygame.display.set_caption(self.screen_model.title or "SUM Terminal"); self._last_title=self.screen_model.title;
-                signature=self._render_signature(); redraw=self._force_redraw or signature!=self._last_render_signature;
-                if self.visible and redraw:
-                    surface=pygame.display.get_surface(); theme=self.theme; surface.fill(theme.bg); cell_w,cell_h=self._update_size(pygame,self.font,self.header_height); self._draw_header(pygame,surface,self.header_font,theme,self.header_height); pygame.draw.rect(surface,self.screen_model.default_bg,(0,self.header_height,surface.get_width(),max(0,surface.get_height()-self.header_height))); self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h); pygame.display.flip(); self._last_render_signature=self._render_signature(); self._force_redraw=False;
+                try:
+                    if self.screen_model.title!=self._last_title:
+                        pygame.display.set_caption(self.screen_model.title or "SUM Terminal");
+                        self._last_title=self.screen_model.title;
+                except Exception as exc:
+                    self._record_runtime_error("window title",exc);
+                try:
+                    self._render_frame(pygame);
+                except Exception as exc:
+                    self._record_runtime_error("terminal renderer",exc);
+                    self._render_emergency_frame(pygame);
         finally:
             if self.ipc is not None: self.ipc.close();
             for tab in list(self._tabs):

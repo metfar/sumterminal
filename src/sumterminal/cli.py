@@ -22,6 +22,7 @@
 import argparse;
 import os;
 import shlex;
+import signal;
 import shutil;
 import subprocess;
 import sys;
@@ -31,6 +32,7 @@ from sumkeyboard.hotkeys import uninstall_global_shortcut;
 
 from . import __version__;
 from .config import config_path, load_preferences, save_preferences;
+from .crashlog import crash_log_path, install_faulthandler, log_message;
 from .errors import TerminalError;
 from .gui import GuiTerminalView;
 from .ipc import send_command;
@@ -62,7 +64,10 @@ def parser():
     value.add_argument("--uninstall",action="store_true",help="remove the global drop-down shortcut when supported");
     value.add_argument("--no-raw",action="store_true",help="do not put host stdin in raw mode with --host");
     value.add_argument("--trace-input",action="store_true",help="trace GUI keyboard modes and bytes written to the PTY on stderr");
+    value.add_argument("--no-crash-restart",action="store_true",help="do not restart the GUI worker after a fatal native crash");
+    value.add_argument("--print-crash-log",action="store_true",help="print the terminal crash-log path and exit");
     value.add_argument("--print-default-shell",action="store_true",help="print the resolved default shell command and exit");
+    value.add_argument("--_worker",action="store_true",help=argparse.SUPPRESS);
     value.add_argument("command",nargs=argparse.REMAINDER,help="command after --; default is sumbash");
     return value;
 
@@ -100,10 +105,51 @@ def _install(preferences):
     return 0 if result.installed else 2;
 
 
+def _fatal_native_returncode(code):
+    value=int(code or 0);
+    if os.name=="posix" and value<0:
+        fatal=set();
+        for name in ("SIGSEGV","SIGBUS","SIGILL","SIGABRT","SIGFPE"):
+            signum=getattr(signal,name,None);
+            if signum is not None: fatal.add(-int(signum));
+        return value in fatal;
+    if os.name=="nt":
+        unsigned=value & 0xFFFFFFFF;
+        return unsigned in (0xC0000005,0xC000001D,0xC0000094,0xC0000409);
+    return False;
+
+
+def _supervise_gui(raw_argv):
+    command=[sys.executable,"-m","sumterminal","--_worker",*list(raw_argv or [])];
+    crashes=[];
+    while True:
+        started=time.monotonic();
+        code=subprocess.call(command);
+        if not _fatal_native_returncode(code):
+            return int(code or 0);
+        now=time.monotonic();
+        crashes=[stamp for stamp in crashes if now-stamp<20.0];
+        crashes.append(now);
+        detail="GUI worker crashed with status {}; restarting (crash log: {})".format(code,crash_log_path());
+        print("sumterminal: {}".format(detail),file=sys.stderr);
+        log_message(detail);
+        if len(crashes)>=3:
+            detail="GUI worker crashed 3 times within 20 seconds; automatic restart stopped";
+            print("sumterminal: {}".format(detail),file=sys.stderr);
+            log_message(detail);
+            return 1;
+        if time.monotonic()-started<0.5:
+            time.sleep(0.25);
+
+
 def main(argv=None):
-    args=parser().parse_args(argv); preferences=load_preferences();
+    raw_argv=list(sys.argv[1:] if argv is None else argv);
+    args=parser().parse_args(raw_argv); preferences=load_preferences();
     if args.list_themes:
         for name in available_terminal_themes(): print(name);
+        return 0;
+    if args.print_crash_log:
+        print(crash_log_path());
         return 0;
     if args.theme is not None: preferences.general.theme=canonical_theme_name(args.theme,strict=True);
     if args.font is not None: preferences.general.font_name=str(args.font);
@@ -123,10 +169,14 @@ def main(argv=None):
         if args.shell and command: print("sumterminal: use either --shell or a command after --, not both",file=sys.stderr); return 2;
         if args.shell: command=shlex.split(args.shell);
         elif not command and preferences.general.shell.casefold()!="sumbash": command=shlex.split(preferences.general.shell);
-        session=TerminalSession(command=command or None,cwd=args.cwd,rows=args.rows,columns=args.columns);
         force_gui=bool(args.gui or args.drop_down); frontend="host" if args.host else ("gui" if force_gui else preferences.general.frontend);
+        if frontend=="gui" and not args._worker and not args.no_crash_restart and GuiTerminalView.available():
+            return _supervise_gui(raw_argv);
+        session=TerminalSession(command=command or None,cwd=args.cwd,rows=args.rows,columns=args.columns);
         if frontend=="gui":
-            if GuiTerminalView.available(): return GuiTerminalView(session,preferences=preferences,drop_down=args.drop_down,trace_input=args.trace_input).run();
+            if GuiTerminalView.available():
+                install_faulthandler();
+                return GuiTerminalView(session,preferences=preferences,drop_down=args.drop_down,trace_input=args.trace_input).run();
             if force_gui: raise TerminalError("graphical frontend requested but sumGUI/Pygame is unavailable");
             if sys.stdin.isatty() and sys.stdout.isatty(): print("sumterminal: GUI unavailable; falling back to host terminal",file=sys.stderr); return HostTerminalView(session,raw=not args.no_raw).run();
             raise TerminalError("GUI unavailable and no host TTY is available");

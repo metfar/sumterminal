@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a8
+# sumTerminal 0.1.0a13
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -90,6 +90,20 @@ The graphical preference view exposes the SUM theme, default shell command, font
 When Preferences is opened from the drop-down, the terminal window is hidden
 while the preference window is active and restored afterwards.  The PTY and
 shell remain alive.  The terminal now avoids unconditional display recreation when Preferences closes.  Theme/font-only changes keep the existing SDL window; `pygame.display.set_mode()` is used only when the requested geometry actually changed.  This avoids the hidden-window recreation path that can crash in some distro Pygame/SDL combinations.
+
+## Runtime error containment and crash recovery
+
+The graphical frontend keeps ordinary Python runtime errors inside the terminal process instead of immediately unwinding the GUI.  Input, PTY servicing, preference reloads and rendering are guarded independently; a caught error is logged and displayed as an in-window error banner.  `Esc` dismisses the banner while the terminal continues running.
+
+Crash diagnostics are written under the XDG state directory, normally:
+
+```text
+~/.local/state/sumterminal/crash.log
+```
+
+Use `sumterminal --print-crash-log` to print the resolved path.  Python's `faulthandler` is enabled for the GUI worker so native faults have a useful traceback when the runtime can emit one.
+
+A native segmentation fault cannot be caught safely by Python in the process that faults.  On supported platforms the normal GUI launcher therefore supervises a worker process and restarts the graphical terminal after fatal native crash signals such as `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGABRT` or `SIGFPE`.  Three rapid crashes within twenty seconds stop automatic restart to avoid a crash loop.  `--no-crash-restart` disables the supervisor.  A restarted worker opens a new PTY/session; preserving a live PTY across a native GUI-process crash would require moving session ownership into the supervisor and is not claimed yet.
 
 ## Graphical terminal screen
 

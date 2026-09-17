@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a11" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a13" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -703,3 +703,57 @@ def test_gui_shift_page_keys_scroll_history_without_writing_to_pty():
     fake=SimpleNamespace(KMOD_CTRL=1,KMOD_SHIFT=2,KMOD_ALT=4,KMOD_GUI=8,K_F12=10,K_COMMA=11,K_t=12,K_RETURN=13,K_BACKSPACE=14,K_TAB=15,K_ESCAPE=16,K_UP=17,K_DOWN=18,K_RIGHT=19,K_LEFT=20,K_HOME=21,K_END=22,K_PAGEUP=23,K_PAGEDOWN=24,K_INSERT=25,K_DELETE=26,K_F1=27,K_F2=28,K_F3=29,K_F4=30,K_F5=31,K_F6=32,K_F7=33,K_F8=34,K_F9=35,K_F10=36,K_F11=37,K_SPACE=38,key=SimpleNamespace(name=lambda value:"page up"));
     session=SimpleNamespace(size=TerminalSize(3,4)); view=GuiTerminalView(session,preferences=TerminalPreferences()); view.screen_model.feed("a\r\nb\r\nc\r\nd");
     event=SimpleNamespace(key=23,mod=2,unicode=""); assert view._key_bytes(fake,event)==b""; assert view.active_tab.scroll_offset==1;
+
+
+def test_gui_runtime_error_is_recorded_without_stopping_view(monkeypatch,tmp_path):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    target=tmp_path/"crash.log";
+    monkeypatch.setattr("sumterminal.gui.log_exception",lambda context,exc:target);
+    session=SimpleNamespace(size=TerminalSize(24,80));
+    view=GuiTerminalView(session,preferences=TerminalPreferences());
+    view.running=True;
+    assert view._record_runtime_error("test stage",ValueError("boom")) is False;
+    assert view.running is True;
+    assert view._runtime_error==("ValueError","boom");
+    assert view._runtime_error_context=="test stage";
+    assert view._runtime_error_log==str(target);
+    assert view._force_redraw is True;
+
+
+def test_gui_escape_dismisses_runtime_error(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(24,80));
+    view=GuiTerminalView(session,preferences=TerminalPreferences());
+    view._runtime_error=("RuntimeError","boom");
+    view._runtime_error_context="renderer";
+    fake_pygame=SimpleNamespace(KEYDOWN=10,K_ESCAPE=27);
+    event=SimpleNamespace(type=10,key=27);
+    assert view._handle_pygame_event(fake_pygame,event) is True;
+    assert view._runtime_error is None;
+
+
+@pytest.mark.skipif(os.name!="posix",reason="POSIX crash signal semantics")
+def test_gui_supervisor_restarts_after_sigsegv_only(monkeypatch):
+    import signal;
+    from sumterminal import cli;
+    calls=[];
+    values=[-int(signal.SIGSEGV),0];
+    monkeypatch.setattr(cli.subprocess,"call",lambda command:calls.append(tuple(command)) or values.pop(0));
+    monkeypatch.setattr(cli.time,"monotonic",lambda:1.0);
+    monkeypatch.setattr(cli.time,"sleep",lambda _value:None);
+    monkeypatch.setattr(cli,"log_message",lambda _message:None);
+    assert cli._supervise_gui(["--gui"])==0;
+    assert len(calls)==2;
+    assert "--_worker" in calls[0];
+    assert cli._fatal_native_returncode(-int(signal.SIGSEGV)) is True;
+    assert cli._fatal_native_returncode(-int(signal.SIGTERM)) is False;
+
+
+def test_cli_print_crash_log(capsys):
+    from sumterminal import cli;
+    assert cli.main(["--print-crash-log"])==0;
+    assert capsys.readouterr().out.strip().endswith("crash.log");
