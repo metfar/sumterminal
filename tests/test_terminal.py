@@ -669,3 +669,37 @@ def test_monospace_font_filter_keeps_only_fixed_width_names():
         @staticmethod
         def SysFont(name,size): return FakeFont(name);
     result=_monospace_fonts(SimpleNamespace(font=FontAPI()),"mono"); assert "mono" in result; assert "prop" not in result;
+
+
+def test_gui_scrollback_view_uses_saved_primary_history():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(3,4)); view=GuiTerminalView(session,preferences=TerminalPreferences()); screen=view.screen_model;
+    screen.feed("a\r\nb\r\nc\r\nd");
+    assert screen.text_lines()==["b","c","d"];
+    assert ["".join(cell.char for cell in line).rstrip() for line in screen.scrollback]==["a"];
+    assert view._scroll_view(1)==1;
+    assert ["".join(cell.char for cell in line).rstrip() for line in view._viewport_lines()]==["a","b","c"];
+    assert view._scroll_view(-1)==0;
+    assert ["".join(cell.char for cell in line).rstrip() for line in view._viewport_lines()]==["b","c","d"];
+
+
+def test_gui_scrollback_is_disabled_while_alternate_screen_is_active():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(3,4)); view=GuiTerminalView(session,preferences=TerminalPreferences()); screen=view.screen_model;
+    screen.feed("a\r\nb\r\nc\r\nd"); assert len(screen.scrollback)==1;
+    screen.feed("\x1b[?1049h");
+    assert view._scroll_view(10)==0;
+    assert view.active_tab.scroll_offset==0;
+
+
+def test_gui_shift_page_keys_scroll_history_without_writing_to_pty():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    fake=SimpleNamespace(KMOD_CTRL=1,KMOD_SHIFT=2,KMOD_ALT=4,KMOD_GUI=8,K_F12=10,K_COMMA=11,K_t=12,K_RETURN=13,K_BACKSPACE=14,K_TAB=15,K_ESCAPE=16,K_UP=17,K_DOWN=18,K_RIGHT=19,K_LEFT=20,K_HOME=21,K_END=22,K_PAGEUP=23,K_PAGEDOWN=24,K_INSERT=25,K_DELETE=26,K_F1=27,K_F2=28,K_F3=29,K_F4=30,K_F5=31,K_F6=32,K_F7=33,K_F8=34,K_F9=35,K_F10=36,K_F11=37,K_SPACE=38,key=SimpleNamespace(name=lambda value:"page up"));
+    session=SimpleNamespace(size=TerminalSize(3,4)); view=GuiTerminalView(session,preferences=TerminalPreferences()); view.screen_model.feed("a\r\nb\r\nc\r\nd");
+    event=SimpleNamespace(key=23,mod=2,unicode=""); assert view._key_bytes(fake,event)==b""; assert view.active_tab.scroll_offset==1;

@@ -62,6 +62,7 @@ class _TerminalTab:
         self.encoder=TerminalInputEncoder(self.screen.modes);
         self.eof=False;
         self.exit_code=None;
+        self.scroll_offset=0;
 
 
 class GuiTerminalView:
@@ -147,7 +148,24 @@ class GuiTerminalView:
         return " ".join("{:02x}".format(value) for value in bytes(data or b""));
 
     def _render_signature(self):
-        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size));
+        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size));
+
+    @staticmethod
+    def _max_scroll_offset(tab):
+        if tab.screen.modes.alternate_screen: return 0;
+        return max(0,len(tab.screen.scrollback));
+
+    def _scroll_view(self,delta):
+        tab=self.active_tab; maximum=self._max_scroll_offset(tab); old=tab.scroll_offset; tab.scroll_offset=max(0,min(maximum,int(old)+int(delta)));
+        if tab.scroll_offset!=old: self._force_redraw=True;
+        return tab.scroll_offset;
+
+    def _viewport_lines(self,tab=None):
+        tab=tab or self.active_tab; screen=tab.screen; offset=max(0,min(self._max_scroll_offset(tab),int(tab.scroll_offset)));
+        if offset<=0: return screen.lines;
+        history=list(screen.scrollback)+list(screen.lines); end=max(0,len(history)-offset); start=max(0,end-screen.rows); lines=history[start:end];
+        if len(lines)<screen.rows: lines=[screen._blank_line() for _ in range(screen.rows-len(lines))]+lines;
+        return lines[-screen.rows:];
 
     @staticmethod
     def available():
@@ -316,7 +334,10 @@ class GuiTerminalView:
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_COMMA: self._open_preferences(); return b"";
         if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==pygame.K_t: self._new_tab(); return b"";
         shift=bool(mod & pygame.KMOD_SHIFT); alt=bool(mod & pygame.KMOD_ALT); ctrl=bool(mod & pygame.KMOD_CTRL); semantic=self._semantic_key(pygame,key); text=getattr(event,"unicode","");
+        if shift and semantic=="pageup": self._scroll_view(max(1,self.screen_model.rows-1)); return b"";
+        if shift and semantic=="pagedown": self._scroll_view(-max(1,self.screen_model.rows-1)); return b"";
         data=self.active_tab.encoder.encode_key(semantic,shift=shift,alt=alt,ctrl=ctrl,text=text); modes=self.screen_model.modes;
+        if data and self.active_tab.scroll_offset: self.active_tab.scroll_offset=0; self._force_redraw=True;
         self._trace("KEYDOWN key={} semantic={} mod={} shift={} alt={} ctrl={} text={!r} app_cursor={} app_keypad={} kitty_flags={} send={}".format(key,semantic,mod,shift,alt,ctrl,text,modes.application_cursor,modes.application_keypad,modes.keyboard_flags,self._hex(data)));
         return data;
 
@@ -402,8 +423,8 @@ class GuiTerminalView:
         return False;
 
     def _draw_screen(self,pygame,surface,font,theme,header_height,cell_w,cell_h):
-        y0=header_height;
-        for row,line in enumerate(self.screen_model.lines):
+        y0=header_height; tab=self.active_tab; viewport=self._viewport_lines(tab);
+        for row,line in enumerate(viewport):
             y=y0+row*cell_h;
             for column,cell in enumerate(line):
                 x=column*cell_w; fg,bg=(cell.bg,cell.fg) if cell.inverse else (cell.fg,cell.bg); shown_fg=_display_fg(self.screen_model,fg,cell.bold);
@@ -412,7 +433,7 @@ class GuiTerminalView:
                 if char!=" ":
                     renderer=self.bold_font if cell.bold and self.bold_font is not None else font; rendered=renderer.render(char,True,shown_fg); surface.blit(rendered,(x,y+self.glyph_offset_y));
                 if cell.underline: pygame.draw.line(surface,shown_fg,(x,y+cell_h-2),(x+cell_w,y+cell_h-2),1);
-        if self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
+        if tab.scroll_offset==0 and self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
             col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h+self.glyph_offset_y; cursor_h=min(cell_h,self.glyph_height); pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cursor_h));
             try: cell=self.screen_model.lines[self.screen_model.row][col]; char=cell.char;
             except (IndexError,AttributeError): cell=None; char=" ";
@@ -437,7 +458,10 @@ class GuiTerminalView:
                 if event is None: break;
                 chunks+=1; total+=len(getattr(event,"raw",b"") or b"");
                 if event.kind=="output":
-                    tab.screen.feed(event.text);
+                    before_scrollback=len(tab.screen.scrollback); was_scrolled=tab.scroll_offset>0; tab.screen.feed(event.text);
+                    if tab.screen.modes.alternate_screen: tab.scroll_offset=0;
+                    elif was_scrolled:
+                        added=max(0,len(tab.screen.scrollback)-before_scrollback); tab.scroll_offset=min(self._max_scroll_offset(tab),tab.scroll_offset+added);
                     while tab.screen.pending_replies:
                         reply=tab.screen.pending_replies.pop(0);
                         try: tab.session.write(reply);
@@ -491,11 +515,19 @@ class GuiTerminalView:
                 for event in pygame.event.get():
                     if event.type==pygame.QUIT: self.running=False;
                     elif event.type==pygame.VIDEORESIZE: self._update_size(pygame,self.font,self.header_height); self._force_redraw=True;
+                    elif event.type==getattr(pygame,"MOUSEWHEEL",-999):
+                        if self.screen_model.mouse_tracking and self.screen_model.mouse_sgr:
+                            button=4 if int(getattr(event,"y",0))>0 else 5; synthetic=type("WheelEvent",(),{"button":button,"pos":pygame.mouse.get_pos()})(); data=self._mouse_bytes(pygame,synthetic,True);
+                            if data and self.running: self.session.write(data);
+                        else:
+                            amount=int(getattr(event,"y",0) or 0); self._scroll_view(amount*3);
                     elif event.type==pygame.MOUSEBUTTONDOWN:
                         handled=event.button==1 and self._handle_header_click(event.pos);
                         if not handled:
                             data=self._mouse_bytes(pygame,event,True);
                             if data and self.running: self.session.write(data);
+                            elif not hasattr(pygame,"MOUSEWHEEL") and event.button==4: self._scroll_view(3);
+                            elif not hasattr(pygame,"MOUSEWHEEL") and event.button==5: self._scroll_view(-3);
                     elif event.type==pygame.MOUSEBUTTONUP:
                         data=self._mouse_bytes(pygame,event,False);
                         if data and self.running: self.session.write(data);
