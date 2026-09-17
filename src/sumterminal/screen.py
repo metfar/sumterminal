@@ -55,7 +55,7 @@ class TerminalScreen:
     def __init__(self,rows=24,columns=80,scrollback=5000):
         self.ansi16=tuple(_ANSI16); self.rows=max(1,int(rows)); self.columns=max(1,int(columns)); self.scrollback_limit=max(0,int(scrollback));
         self.default_fg=self.ansi16[7]; self.default_bg=self.ansi16[0]; self.scrollback=[]; self.title="SUM Terminal";
-        self._alternate=False; self._saved_primary=None; self.reset();
+        self._alternate=False; self._saved_primary=None; self.revision=0; self.reset();
 
     def set_palette(self,ansi16=None,default_fg=None,default_bg=None,remap=True):
         old_palette=tuple(self.ansi16); old_fg=tuple(self.default_fg); old_bg=tuple(self.default_bg);
@@ -73,7 +73,7 @@ class TerminalScreen:
                 for cell in line:
                     cell.fg=remap_color(cell.fg,False); cell.bg=remap_color(cell.bg,True);
             self.fg=remap_color(self.fg,False); self.bg=remap_color(self.bg,True);
-        self.ansi16=new_palette; self.default_fg=new_fg; self.default_bg=new_bg;
+        self.ansi16=new_palette; self.default_fg=new_fg; self.default_bg=new_bg; self.revision+=1;
         return self;
 
     def _blank_cell(self):
@@ -83,7 +83,7 @@ class TerminalScreen:
         return [self._blank_cell() for _ in range(self.columns)];
 
     def reset(self):
-        self.lines=[self._blank_line() for _ in range(self.rows)]; self.row=0; self.col=0; self.saved=(0,0); self.scroll_top=0; self.scroll_bottom=self.rows-1;
+        self.lines=[self._blank_line() for _ in range(self.rows)]; self.row=0; self.col=0; self.saved=(0,0); self.scroll_top=0; self.scroll_bottom=self.rows-1; self.revision=getattr(self,"revision",0)+1;
         if hasattr(self,"modes"): self.modes.__dict__.update(TerminalModes().__dict__);
         else: self.modes=TerminalModes();
         self.fg=self.default_fg; self.bg=self.default_bg; self.bold=False; self.underline=False; self.inverse=False; self._state="normal"; self._buffer=""; self.pending_replies=[]; self._keyboard_flags_by_screen={False:0,True:0}; self._keyboard_stacks={False:[],True:[]};
@@ -169,7 +169,7 @@ class TerminalScreen:
         self.modes.cursor_visible=bool(value);
 
     def resize(self,rows,columns):
-        rows=max(1,int(rows)); columns=max(1,int(columns));
+        rows=max(1,int(rows)); columns=max(1,int(columns)); changed=(rows!=self.rows or columns!=self.columns);
         if columns!=self.columns:
             for line in self.lines:
                 if len(line)<columns: line.extend(self._blank_cell() for _ in range(columns-len(line)));
@@ -181,6 +181,7 @@ class TerminalScreen:
             if not self._alternate: self._push_scrollback(removed);
             self.lines=self.lines[self.rows-rows:];
         self.rows=rows; self.row=max(0,min(self.row,self.rows-1)); self.col=max(0,min(self.col,self.columns-1)); self.scroll_top=0; self.scroll_bottom=self.rows-1;
+        if changed: self.revision+=1;
 
     def _push_scrollback(self,lines):
         if self.scrollback_limit<=0: return;
@@ -362,7 +363,9 @@ class TerminalScreen:
         if code in ("0","2") and value: self.title=value;
 
     def feed(self,text):
-        for char in str(text or ""):
+        value=str(text or "");
+        if value: self.revision+=1;
+        for char in value:
             if self._state=="normal":
                 if char=="\x1b": self._state="esc";
                 elif char=="\r": self.col=0;

@@ -67,12 +67,16 @@ class _TerminalTab:
 class GuiTerminalView:
     """SUM-owned graphical terminal view over one or more TerminalSession objects.""";
 
-    def __init__(self,session,preferences=None,drop_down=False,start_hidden=False):
+    def __init__(self,session,preferences=None,drop_down=False,start_hidden=False,trace_input=False):
         self.preferences=(preferences or load_preferences()).normalized();
         self.drop_down=bool(drop_down);
         self.start_hidden=bool(start_hidden);
         self.visible=not self.start_hidden;
         self.running=False;
+        self.trace_input=bool(trace_input or os.environ.get("SUMTERMINAL_TRACE_INPUT"));
+        self.poll_hz=max(30,min(1000,int(os.environ.get("SUMTERMINAL_POLL_HZ","144") or 144)));
+        self._force_redraw=True;
+        self._last_render_signature=None;
         self._tabs=[_TerminalTab(session)];
         self._active_index=0;
         self.ipc=DropdownIPCServer() if self.drop_down else None;
@@ -128,6 +132,23 @@ class GuiTerminalView:
     def tab_count(self):
         return len(self._tabs);
 
+    def _trace(self,message):
+        if not self.trace_input: return;
+        try: print("sumterminal[trace]: {}".format(message),file=sys.stderr,flush=True);
+        except Exception: pass;
+
+    @staticmethod
+    def _mode_signature(screen):
+        modes=screen.modes;
+        return (bool(modes.application_cursor),bool(modes.application_keypad),int(modes.keyboard_flags),bool(modes.bracketed_paste),int(modes.mouse_tracking),bool(modes.mouse_sgr),bool(modes.alternate_screen));
+
+    @staticmethod
+    def _hex(data):
+        return " ".join("{:02x}".format(value) for value in bytes(data or b""));
+
+    def _render_signature(self):
+        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size));
+
     @staticmethod
     def available():
         try:
@@ -154,7 +175,7 @@ class GuiTerminalView:
         self._tabs.append(_TerminalTab(session));
         foreground,background,_cursor,_selection_bg,_selection_text=terminal_colors(self.sum_theme); self._tabs[-1].screen.set_palette(terminal_ansi16(self.sum_theme),default_fg=foreground,default_bg=background,remap=False);
         self._active_index=len(self._tabs)-1;
-        self._last_title="";
+        self._last_title=""; self._force_redraw=True;
         return self.active_tab;
 
     def _close_tab(self,index=None):
@@ -170,14 +191,14 @@ class GuiTerminalView:
         tab.session.close();
         if self._active_index>value: self._active_index-=1;
         elif self._active_index>=len(self._tabs): self._active_index=len(self._tabs)-1;
-        self._last_title="";
+        self._last_title=""; self._force_redraw=True;
 
     def _switch_tab(self,index):
         if not self._tabs: return;
         value=max(0,min(len(self._tabs)-1,int(index)));
         if value!=self._active_index:
             self._active_index=value;
-            self._last_title="";
+            self._last_title=""; self._force_redraw=True;
 
     def _geometry(self,pygame):
         sizes=getattr(pygame.display,"get_desktop_sizes",lambda:[])();
@@ -205,7 +226,7 @@ class GuiTerminalView:
         return width,height;
 
     def _set_visible(self,value):
-        self.visible=bool(value); window=self._sdl_window();
+        self.visible=bool(value); self._force_redraw=True; window=self._sdl_window();
         if window is not None:
             try:
                 if self.visible:
@@ -258,7 +279,7 @@ class GuiTerminalView:
         geometry_changed=previous_size!=target_size; opacity_changed=float(previous.dropdown.opacity)!=float(self.preferences.dropdown.opacity); position_changed=str(previous.dropdown.position)!=str(self.preferences.dropdown.position);
         if geometry_changed: pygame.display.set_mode(target_size,self._flags);
         if geometry_changed or opacity_changed or position_changed: self._apply_window_properties(pygame);
-        self._update_size(pygame,self.font,self.header_height);
+        self._update_size(pygame,self.font,self.header_height); self._force_redraw=True;
 
     def _open_preferences(self):
         if self._preferences_process is not None and self._preferences_process.poll() is None: return;
@@ -291,8 +312,10 @@ class GuiTerminalView:
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_COMMA: self._open_preferences(); return b"";
         if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==pygame.K_t: self._new_tab(); return b"";
-        shift=bool(mod & pygame.KMOD_SHIFT); alt=bool(mod & pygame.KMOD_ALT); ctrl=bool(mod & pygame.KMOD_CTRL);
-        return self.active_tab.encoder.encode_key(self._semantic_key(pygame,key),shift=shift,alt=alt,ctrl=ctrl,text=getattr(event,"unicode",""));
+        shift=bool(mod & pygame.KMOD_SHIFT); alt=bool(mod & pygame.KMOD_ALT); ctrl=bool(mod & pygame.KMOD_CTRL); semantic=self._semantic_key(pygame,key); text=getattr(event,"unicode","");
+        data=self.active_tab.encoder.encode_key(semantic,shift=shift,alt=alt,ctrl=ctrl,text=text); modes=self.screen_model.modes;
+        self._trace("KEYDOWN key={} semantic={} mod={} shift={} alt={} ctrl={} text={!r} app_cursor={} app_keypad={} kitty_flags={} send={}".format(key,semantic,mod,shift,alt,ctrl,text,modes.application_cursor,modes.application_keypad,modes.keyboard_flags,self._hex(data)));
+        return data;
 
     def _mouse_bytes(self,pygame,event,pressed=True):
         screen=self.screen_model;
@@ -409,16 +432,25 @@ class GuiTerminalView:
         for fd in ready:
             tab=mapping.get(fd);
             if tab is None: continue;
-            event=tab.session.read_event(65536);
-            if event is None: continue;
-            if event.kind=="output":
-                tab.screen.feed(event.text);
-                while tab.screen.pending_replies:
-                    reply=tab.screen.pending_replies.pop(0);
-                    try: tab.session.write(reply);
-                    except Exception: break;
-            elif event.kind=="eof": tab.eof=True;
-            elif event.kind=="exit": tab.exit_code=int(event.exit_code or 0);
+            before=self._mode_signature(tab.screen); chunks=0; total=0;
+            while chunks<128:
+                event=tab.session.read_event(65536);
+                if event is None: break;
+                chunks+=1; total+=len(getattr(event,"raw",b"") or b"");
+                if event.kind=="output":
+                    tab.screen.feed(event.text);
+                    while tab.screen.pending_replies:
+                        reply=tab.screen.pending_replies.pop(0);
+                        try: tab.session.write(reply);
+                        except Exception: break;
+                elif event.kind=="eof": tab.eof=True; break;
+                elif event.kind=="exit": tab.exit_code=int(event.exit_code or 0);
+                try: more,_,_=select.select([fd],[],[],0);
+                except (OSError,ValueError): more=[];
+                if not more: break;
+            after=self._mode_signature(tab.screen);
+            if before!=after: self._trace("MODES app_cursor={} app_keypad={} kitty_flags={} bracketed={} mouse={} sgr={} alternate={}".format(*after));
+            if chunks>1: self._trace("PTY burst chunks={} bytes={}".format(chunks,total));
         exited=[];
         for index,tab in enumerate(self._tabs):
             code=tab.session.poll();
@@ -445,7 +477,7 @@ class GuiTerminalView:
         clock=pygame.time.Clock(); self.running=True; exit_code=0;
         try:
             while self.running:
-                clock.tick(60);
+                clock.tick(self.poll_hz);
                 if self._preferences_finished:
                     self._preferences_finished=False; self._preferences_process=None; self._set_visible(True); self._reload_preferences(pygame); self._preferences_reload_pending=False;
                 if self.ipc is not None:
@@ -459,7 +491,7 @@ class GuiTerminalView:
                         elif command=="quit": self.running=False;
                 for event in pygame.event.get():
                     if event.type==pygame.QUIT: self.running=False;
-                    elif event.type==pygame.VIDEORESIZE: self._update_size(pygame,self.font,self.header_height);
+                    elif event.type==pygame.VIDEORESIZE: self._update_size(pygame,self.font,self.header_height); self._force_redraw=True;
                     elif event.type==pygame.MOUSEBUTTONDOWN:
                         handled=event.button==1 and self._handle_header_click(event.pos);
                         if not handled:
@@ -483,8 +515,9 @@ class GuiTerminalView:
                 exit_code=int(self.active_tab.exit_code or 0);
                 if self.screen_model.title!=self._last_title:
                     pygame.display.set_caption(self.screen_model.title or "SUM Terminal"); self._last_title=self.screen_model.title;
-                if self.visible:
-                    surface=pygame.display.get_surface(); theme=self.theme; surface.fill(theme.bg); cell_w,cell_h=self._update_size(pygame,self.font,self.header_height); self._draw_header(pygame,surface,self.header_font,theme,self.header_height); pygame.draw.rect(surface,self.screen_model.default_bg,(0,self.header_height,surface.get_width(),max(0,surface.get_height()-self.header_height))); self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h); pygame.display.flip();
+                signature=self._render_signature(); redraw=self._force_redraw or signature!=self._last_render_signature;
+                if self.visible and redraw:
+                    surface=pygame.display.get_surface(); theme=self.theme; surface.fill(theme.bg); cell_w,cell_h=self._update_size(pygame,self.font,self.header_height); self._draw_header(pygame,surface,self.header_font,theme,self.header_height); pygame.draw.rect(surface,self.screen_model.default_bg,(0,self.header_height,surface.get_width(),max(0,surface.get_height()-self.header_height))); self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h); pygame.display.flip(); self._last_render_signature=self._render_signature(); self._force_redraw=False;
         finally:
             if self.ipc is not None: self.ipc.close();
             for tab in list(self._tabs):

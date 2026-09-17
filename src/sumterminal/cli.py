@@ -61,6 +61,7 @@ def parser():
     value.add_argument("--install",action="store_true",help="install/update the global drop-down shortcut from preferences");
     value.add_argument("--uninstall",action="store_true",help="remove the global drop-down shortcut when supported");
     value.add_argument("--no-raw",action="store_true",help="do not put host stdin in raw mode with --host");
+    value.add_argument("--trace-input",action="store_true",help="trace GUI keyboard modes and bytes written to the PTY on stderr");
     value.add_argument("--print-default-shell",action="store_true",help="print the resolved default shell command and exit");
     value.add_argument("command",nargs=argparse.REMAINDER,help="command after --; default is sumbash");
     return value;
@@ -125,7 +126,7 @@ def main(argv=None):
         session=TerminalSession(command=command or None,cwd=args.cwd,rows=args.rows,columns=args.columns);
         force_gui=bool(args.gui or args.drop_down); frontend="host" if args.host else ("gui" if force_gui else preferences.general.frontend);
         if frontend=="gui":
-            if GuiTerminalView.available(): return GuiTerminalView(session,preferences=preferences,drop_down=args.drop_down).run();
+            if GuiTerminalView.available(): return GuiTerminalView(session,preferences=preferences,drop_down=args.drop_down,trace_input=args.trace_input).run();
             if force_gui: raise TerminalError("graphical frontend requested but sumGUI/Pygame is unavailable");
             if sys.stdin.isatty() and sys.stdout.isatty(): print("sumterminal: GUI unavailable; falling back to host terminal",file=sys.stderr); return HostTerminalView(session,raw=not args.no_raw).run();
             raise TerminalError("GUI unavailable and no host TTY is available");

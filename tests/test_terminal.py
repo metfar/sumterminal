@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a9" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a10" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -597,3 +597,33 @@ def test_sumedit_tui_accepts_sumterminal_cursor_and_alt_f3_sequences(tmp_path):
         try: session.wait(timeout=1.0);
         except Exception: pass;
         session.close();
+
+
+def test_terminal_screen_revision_changes_only_when_screen_state_is_touched():
+    from sumterminal.screen import TerminalScreen;
+    screen=TerminalScreen(2,4); base=screen.revision;
+    screen.feed("");
+    assert screen.revision==base;
+    screen.feed("x");
+    assert screen.revision==base+1;
+    value=screen.revision; screen.resize(2,4); assert screen.revision==value;
+    screen.resize(3,4); assert screen.revision==value+1;
+
+
+def test_cli_trace_input_option_is_parsed():
+    from sumterminal.cli import parser;
+    args=parser().parse_args(["--trace-input","--gui"]);
+    assert args.trace_input is True;
+
+
+def test_gui_key_trace_reports_application_mode_and_encoded_bytes(capsys):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    fake=SimpleNamespace(KMOD_CTRL=1,KMOD_SHIFT=2,KMOD_ALT=4,KMOD_GUI=8,K_F12=10,K_COMMA=11,K_t=12,K_RETURN=13,K_BACKSPACE=14,K_TAB=15,K_ESCAPE=16,K_UP=17,K_DOWN=18,K_RIGHT=19,K_LEFT=20,K_HOME=21,K_END=22,K_PAGEUP=23,K_PAGEDOWN=24,K_INSERT=25,K_DELETE=26,K_F1=27,K_F2=28,K_F3=29,K_F4=30,K_F5=31,K_F6=32,K_F7=33,K_F8=34,K_F9=35,K_F10=36,K_F11=37,K_SPACE=38,key=SimpleNamespace(name=lambda value:"up"));
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=TerminalPreferences(),trace_input=True); view.screen_model.feed("\x1b[?1h");
+    event=SimpleNamespace(key=17,mod=0,unicode="");
+    assert view._key_bytes(fake,event)==b"\x1bOA";
+    trace=capsys.readouterr().err;
+    assert "app_cursor=True" in trace;
+    assert "send=1b 4f 41" in trace;
