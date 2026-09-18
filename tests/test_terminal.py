@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a18" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a19" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -914,3 +914,14 @@ def test_font_preferences_request_bold_and_italic_faces():
     fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; prefs.general.font_bold=True; prefs.general.font_italic=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
     assert calls[0][2:] == (True,True);
     assert view.font.bold is True; assert view.font.italic is True;
+
+
+def test_preferences_migrate_incomplete_shortcut_without_losing_other_settings(tmp_path):
+    from sumterminal.config import load_preferences;
+    path=tmp_path/"terminal.toml";
+    path.write_text('[general]\nfont_name = "DejaVu Sans Mono"\nfont_size = 21\n\n[dropdown]\nshortcut = "Press shortcut..."\nheight = 61\n',encoding="utf-8");
+    loaded=load_preferences(path);
+    assert loaded.dropdown.shortcut=="Ctrl+F12";
+    assert loaded.dropdown.height==61;
+    assert loaded.general.font_name=="DejaVu Sans Mono";
+    assert loaded.general.font_size==21;

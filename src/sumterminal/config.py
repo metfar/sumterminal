@@ -64,7 +64,8 @@ class TerminalPreferences:
         self.general.font_bold=bool(self.general.font_bold);
         self.general.font_italic=bool(self.general.font_italic);
         self.general.font_small_caps=bool(self.general.font_small_caps);
-        self.dropdown.shortcut=normalize_shortcut(self.dropdown.shortcut or "Ctrl+F12");
+        try: self.dropdown.shortcut=normalize_shortcut(self.dropdown.shortcut or "Ctrl+F12");
+        except (TypeError,ValueError): self.dropdown.shortcut="Ctrl+F12";
         self.dropdown.height=max(10,min(100,int(self.dropdown.height)));
         self.dropdown.width=max(20,min(100,int(self.dropdown.width)));
         self.dropdown.opacity=max(0.20,min(1.0,float(self.dropdown.opacity)));

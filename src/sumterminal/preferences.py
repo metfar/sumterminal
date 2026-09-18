@@ -64,7 +64,9 @@ def show_preferences(preferences=None):
             super().__init__(*args,**kwargs); self.capturing=False; self._before=self.value();
         def handle_event(self,event):
             if event.type==pygame.MOUSEBUTTONDOWN and self.rect.collidepoint(event.pos):
-                self.capturing=True; self._before=self.value(); self.set_value("Press shortcut..."); self.has_focus=True; return True;
+                self.capturing=True; self._before=self.value(); self.set_value(""); self.placeholder="Press shortcut..."; self.has_focus=True; return True;
+            if self.capturing and event.type==pygame.MOUSEBUTTONDOWN and not self.rect.collidepoint(event.pos):
+                self.set_value(self._before); self.capturing=False; return False;
             if self.capturing and event.type==pygame.KEYDOWN:
                 if event.key==pygame.K_ESCAPE: self.set_value(self._before); self.capturing=False; return True;
                 modifiers=[];
@@ -104,7 +106,7 @@ def show_preferences(preferences=None):
             shell_value=str(shell.value() or "sumbash").strip();
             if not shell_value: shell_value="sumbash";
             if shell_value.casefold()!="sumbash" and not shlex.split(shell_value): raise ValueError("default shell command is empty");
-            font_selection=font_picker.selection(); value.general.shell=shell_value; value.general.theme=canonical_theme_name(theme_name.value(),strict=True); value.general.font_name=str(font_selection.family or "monospace").strip(); value.general.font_bold=bool(font_selection.bold); value.general.font_italic=bool(font_selection.italic); value.general.font_small_caps=bool(font_selection.small_caps); value.general.font_size=int(round(font_size.value)); value.dropdown.shortcut=normalize_shortcut(shortcut.value()); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
+            font_selection=font_picker.selection(); value.general.shell=shell_value; value.general.theme=canonical_theme_name(theme_name.value(),strict=True); value.general.font_name=str(font_selection.family or "monospace").strip(); value.general.font_bold=bool(font_selection.bold); value.general.font_italic=bool(font_selection.italic); value.general.font_small_caps=bool(font_selection.small_caps); value.general.font_size=int(round(font_size.value)); value.dropdown.shortcut=normalize_shortcut(shortcut.value() or getattr(shortcut,"_before","") or value.dropdown.shortcut); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
             send_command("reload"); status.text="Saved {} — {}. Active terminal applies after Preferences closes.".format(path,result.detail);
             if close: app().running=False;
         except Exception as exc:

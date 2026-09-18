@@ -17,7 +17,7 @@ Requires-Dist: sumio>=0.1.0a1
 Requires-Dist: sumbash>=0.1.0a17
 Requires-Dist: sumgui>=0.2.0a25
 Requires-Dist: sumtui>=0.8.0a29
-Requires-Dist: sumkeyboard>=0.1.0a2
+Requires-Dist: sumkeyboard>=0.1.0a3
 Dynamic: license-file
 
 # sumTerminal 0.1.0a16
