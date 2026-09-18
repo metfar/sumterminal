@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a15
+# sumTerminal 0.1.0a16
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -17,7 +17,7 @@ When graphical support is unavailable, plain `sumterminal` may fall back to the 
 
 ## Keyboard and system clipboard
 
-`sumTerminal` treats SDL `KMOD_MODE` as **AltGr / ISO_Level3_Shift**, not as Alt/Meta.  X11/XKB/Xmodmap therefore remains responsible for resolving Level-3 and Level-4 text: `AltGr`, `Shift+AltGr`, Greek letters, dead keys and other Unicode mappings are sent to the PTY from SDL `TEXTINPUT` without SUM trying to reinterpret the keyboard layout.
+`sumTerminal` treats SDL `KMOD_MODE` **and Right Alt (`KMOD_RALT`)** as **AltGr / ISO_Level3_Shift**, not as Alt/Meta. It also tracks the physical AltGr key while composed text is being delivered, because some X11/SDL combinations expose AltGr as synthetic Ctrl+Alt. X11/XKB/Xmodmap therefore remains responsible for resolving Level-3 and Level-4 text: `AltGr`, `Shift+AltGr`, Greek letters, dead keys and other Unicode mappings are sent to the PTY from SDL `TEXTINPUT` without SUM trying to reinterpret the keyboard layout.
 
 Copy is published through the shared `sumUI` clipboard service, so `Ctrl+Shift+C` / `Ctrl+Insert` can be pasted into non-SUM applications.  Paste reads the same desktop clipboard, so text copied outside SUM is available immediately.
 
@@ -173,5 +173,5 @@ Still later slices:
 
 ## Selection and clipboard
 
-`sumTerminal 0.1.0a15` adds native terminal selection and clipboard actions. Drag with the left mouse button to select when the child application is not using mouse tracking; hold **Shift** while dragging to force terminal selection when applications such as `mc` own the mouse. **Ctrl+Shift+C** or **Ctrl+Insert** copies, **Ctrl+Shift+V** or **Shift+Insert** pastes, and bracketed-paste mode is honoured. Right-click opens **Copy / Paste / Paste special: Markdown** when SumDoc can provide a rich textual representation. `Ctrl+C` remains a PTY interrupt and is deliberately not repurposed as Copy.
+`sumTerminal 0.1.0a16` adds native terminal selection and clipboard actions. Drag with the left mouse button to select when the child application is not using mouse tracking; hold **Shift** while dragging to force terminal selection when applications such as `mc` own the mouse. **Ctrl+Shift+C** or **Ctrl+Insert** copies, **Ctrl+Shift+V** or **Shift+Insert** pastes, and bracketed-paste mode is honoured. Right-click opens **Copy / Paste / Paste special: Markdown** when SumDoc can provide a rich textual representation. `Ctrl+C` remains a PTY interrupt and is deliberately not repurposed as Copy.
 

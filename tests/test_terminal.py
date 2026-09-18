@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a15" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a16" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -791,14 +791,14 @@ def _fake_pygame_for_input(modifiers=0):
     names=("K_RETURN","K_BACKSPACE","K_TAB","K_ESCAPE","K_UP","K_DOWN","K_RIGHT","K_LEFT","K_HOME","K_END","K_PAGEUP","K_PAGEDOWN","K_INSERT","K_DELETE","K_F1","K_F2","K_F3","K_F4","K_F5","K_F6","K_F7","K_F8","K_F9","K_F10","K_F11","K_F12","K_SPACE","K_COMMA","K_c","K_v","K_t");
     values={name:index+100 for index,name in enumerate(names)};
     key_api=SimpleNamespace(get_mods=lambda:modifiers,name=lambda key:"," if key==values["K_COMMA"] else ".");
-    return SimpleNamespace(KEYDOWN=1,QUIT=2,VIDEORESIZE=3,MOUSEWHEEL=4,MOUSEBUTTONDOWN=5,MOUSEBUTTONUP=6,MOUSEMOTION=7,TEXTINPUT=8,KMOD_SHIFT=1,KMOD_CTRL=2,KMOD_ALT=4,KMOD_MODE=8,KMOD_GUI=16,key=key_api,**values);
+    return SimpleNamespace(KEYDOWN=1,KEYUP=9,QUIT=2,VIDEORESIZE=3,MOUSEWHEEL=4,MOUSEBUTTONDOWN=5,MOUSEBUTTONUP=6,MOUSEMOTION=7,TEXTINPUT=8,KMOD_SHIFT=1,KMOD_CTRL=2,KMOD_LALT=4,KMOD_RALT=8,KMOD_ALT=12,KMOD_MODE=16,KMOD_GUI=32,K_RALT=901,K_MODE=902,key=key_api,**values);
 
 
 def test_altgr_printable_key_does_not_trigger_ctrl_shortcut(monkeypatch):
     from types import SimpleNamespace;
     from sumterminal.config import TerminalPreferences;
     from sumterminal.gui import GuiTerminalView;
-    modifiers=2|4|8; pygame=_fake_pygame_for_input(modifiers);
+    modifiers=2|8|16; pygame=_fake_pygame_for_input(modifiers);
     session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=TerminalPreferences()); calls=[];
     monkeypatch.setattr(view,"_open_preferences",lambda:calls.append(True));
     event=SimpleNamespace(key=pygame.K_COMMA,mod=modifiers,unicode="<");
@@ -810,7 +810,7 @@ def test_shift_altgr_textinput_reaches_pty():
     from types import SimpleNamespace;
     from sumterminal.config import TerminalPreferences;
     from sumterminal.gui import GuiTerminalView;
-    modifiers=1|2|4|8; pygame=_fake_pygame_for_input(modifiers);
+    modifiers=1|2|8|16; pygame=_fake_pygame_for_input(modifiers);
     written=[]; session=SimpleNamespace(size=TerminalSize(24,80),write=lambda data:written.append(data)); view=GuiTerminalView(session,preferences=TerminalPreferences()); view.running=True;
     event=SimpleNamespace(type=pygame.TEXTINPUT,text="÷");
     assert view._handle_pygame_event(pygame,event) is True;
@@ -842,3 +842,46 @@ def test_shift_right_click_forces_terminal_context_menu(monkeypatch):
     assert view._handle_pygame_event(pygame,event) is True;
     assert view._context_menu_open is True;
     assert written == [];
+
+
+def test_right_alt_is_altgr_even_without_kmod_mode():
+    from types import SimpleNamespace;
+    from sumui.keyboard import pygame_modifier_state;
+    modifiers=2|8; pygame=_fake_pygame_for_input(modifiers);
+    state=pygame_modifier_state(modifiers,pygame);
+    assert state["altgr"] is True;
+    assert state["right_alt"] is True;
+    assert state["alt"] is False;
+    assert state["ctrl"] is False;
+
+
+def test_physical_right_alt_keeps_textinput_working_when_sdl_reports_ctrl_alt():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    modifiers=2|4; pygame=_fake_pygame_for_input(modifiers);
+    pygame.key.name=lambda key:"right alt" if key==pygame.K_RALT else ".";
+    written=[]; session=SimpleNamespace(size=TerminalSize(24,80),write=lambda data:written.append(data));
+    view=GuiTerminalView(session,preferences=TerminalPreferences()); view.running=True;
+    down=SimpleNamespace(type=pygame.KEYDOWN,key=pygame.K_RALT,mod=modifiers,unicode="");
+    assert view._handle_pygame_event(pygame,down) is True;
+    assert view._altgr_down is True;
+    text=SimpleNamespace(type=pygame.TEXTINPUT,text="Σ");
+    assert view._handle_pygame_event(pygame,text) is True;
+    assert written == ["Σ".encode("utf-8")];
+    up=SimpleNamespace(type=pygame.KEYUP,key=pygame.K_RALT,mod=0,unicode="");
+    assert view._handle_pygame_event(pygame,up) is True;
+    assert view._altgr_down is False;
+
+
+def test_physical_right_alt_shift_level4_text_reaches_pty():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    modifiers=1|2|4; pygame=_fake_pygame_for_input(modifiers);
+    pygame.key.name=lambda key:"right alt" if key==pygame.K_RALT else ".";
+    written=[]; session=SimpleNamespace(size=TerminalSize(24,80),write=lambda data:written.append(data));
+    view=GuiTerminalView(session,preferences=TerminalPreferences()); view.running=True;
+    view._handle_pygame_event(pygame,SimpleNamespace(type=pygame.KEYDOWN,key=pygame.K_RALT,mod=modifiers,unicode=""));
+    view._handle_pygame_event(pygame,SimpleNamespace(type=pygame.TEXTINPUT,text="÷"));
+    assert written == ["÷".encode("utf-8")];

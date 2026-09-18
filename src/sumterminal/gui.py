@@ -110,6 +110,7 @@ class GuiTerminalView:
         self._context_menu_pos=(0,0);
         self._context_menu_rect=None;
         self._context_menu_items=[];
+        self._altgr_down=False;
         self.sum_theme=resolve_theme(self.preferences.general.theme);
         self.theme=None;
         self._runtime_error=None;
@@ -373,6 +374,15 @@ class GuiTerminalView:
         threading.Thread(target=wait_preferences,name="sumterminal-preferences",daemon=True).start();
 
     @staticmethod
+    def _is_altgr_key(pygame,event):
+        key=getattr(event,"key",None);
+        candidates=(getattr(pygame,"K_RALT",None),getattr(pygame,"K_MODE",None),getattr(pygame,"K_ALTGR",None));
+        if any(candidate is not None and key==candidate for candidate in candidates): return True;
+        try: name=str(pygame.key.name(key) or "").casefold();
+        except Exception: name="";
+        return any(token in name for token in ("alt gr","altgr","right alt","mode shift","level3","level 3"));
+
+    @staticmethod
     def _semantic_key(pygame,key):
         mapping={pygame.K_RETURN:"return",pygame.K_BACKSPACE:"backspace",pygame.K_TAB:"tab",pygame.K_ESCAPE:"escape",pygame.K_UP:"up",pygame.K_DOWN:"down",pygame.K_RIGHT:"right",pygame.K_LEFT:"left",pygame.K_HOME:"home",pygame.K_END:"end",pygame.K_PAGEUP:"pageup",pygame.K_PAGEDOWN:"pagedown",pygame.K_INSERT:"insert",pygame.K_DELETE:"delete",pygame.K_F1:"f1",pygame.K_F2:"f2",pygame.K_F3:"f3",pygame.K_F4:"f4",pygame.K_F5:"f5",pygame.K_F6:"f6",pygame.K_F7:"f7",pygame.K_F8:"f8",pygame.K_F9:"f9",pygame.K_F10:"f10",pygame.K_F11:"f11",pygame.K_F12:"f12",pygame.K_SPACE:"space"};
         keypad=(("K_KP0","kp0"),("K_KP1","kp1"),("K_KP2","kp2"),("K_KP3","kp3"),("K_KP4","kp4"),("K_KP5","kp5"),("K_KP6","kp6"),("K_KP7","kp7"),("K_KP8","kp8"),("K_KP9","kp9"),("K_KP_PERIOD","kp_period"),("K_KP_DIVIDE","kp_divide"),("K_KP_MULTIPLY","kp_multiply"),("K_KP_MINUS","kp_minus"),("K_KP_PLUS","kp_plus"),("K_KP_ENTER","kp_enter"),("K_KP_EQUALS","kp_equals"));
@@ -384,7 +394,10 @@ class GuiTerminalView:
         return name.casefold() if isinstance(name,str) else "";
 
     def _key_bytes(self,pygame,event):
-        key=event.key; mod=event.mod; state=pygame_modifier_state(mod,pygame); shift=state["shift"]; alt=state["alt"]; ctrl=state["ctrl"]; altgr=state["altgr"];
+        key=event.key; mod=event.mod; state=pygame_modifier_state(mod,pygame);
+        if self._altgr_down and not state["altgr"]:
+            state=dict(state); state["altgr"]=True; state["alt"]=False; state["ctrl"]=False;
+        shift=state["shift"]; alt=state["alt"]; ctrl=state["ctrl"]; altgr=state["altgr"];
         if ctrl and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
         if ctrl and key==pygame.K_COMMA: self._open_preferences(); return b"";
         if ctrl and shift and key==getattr(pygame,"K_c",-999): self._copy_selection(); return b"";
@@ -696,15 +709,26 @@ class GuiTerminalView:
             data=self._mouse_motion_bytes(pygame,event);
             if data and self.running: self.session.write(data);
             return True;
+        if event.type==getattr(pygame,"KEYUP",-999):
+            if self._is_altgr_key(pygame,event):
+                self._altgr_down=False;
+                self._trace("KEYUP AltGr key={} mod={}".format(getattr(event,"key",None),getattr(event,"mod",0)));
+            return True;
         if event.type==pygame.KEYDOWN:
+            if self._is_altgr_key(pygame,event):
+                self._altgr_down=True;
+                self._trace("KEYDOWN AltGr key={} mod={}".format(getattr(event,"key",None),getattr(event,"mod",0)));
+                return True;
             data=self._key_bytes(pygame,event);
             if data and self.running: self.session.write(data);
             return True;
         if event.type==pygame.TEXTINPUT:
             modifiers=pygame.key.get_mods(); state=pygame_modifier_state(modifiers,pygame);
-            if event.text and self.running and not (state["ctrl"] or state["alt"] or state["gui"]):
+            altgr=bool(state["altgr"] or self._altgr_down);
+            allowed=bool(altgr or not (state["ctrl"] or state["alt"]));
+            if event.text and self.running and allowed and not state["gui"]:
                 self.session.write(event.text.encode("utf-8"));
-                self._trace("TEXTINPUT mod={} altgr={} text={!r}".format(modifiers,state["altgr"],event.text));
+                self._trace("TEXTINPUT mod={} altgr={} text={!r}".format(modifiers,altgr,event.text));
             return True;
         if self.drop_down and self.preferences.dropdown.hide_on_focus_loss and event.type==getattr(pygame,"WINDOWFOCUSLOST",-999):
             self._set_visible(False);
