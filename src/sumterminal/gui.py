@@ -30,7 +30,7 @@ import warnings;
 
 from .config import load_preferences;
 from .crashlog import crash_log_path, log_exception;
-from .ipc import DropdownIPCServer;
+from .ipc import DropdownIPCServer, instance_socket_path;
 from .input import TerminalInputEncoder;
 from .model import TerminalSize;
 from .screen import TerminalScreen;
@@ -88,12 +88,17 @@ class GuiTerminalView:
         self._last_render_signature=None;
         self._tabs=[_TerminalTab(session)];
         self._active_index=0;
-        self.ipc=DropdownIPCServer() if self.drop_down else None;
+        self.ipc=DropdownIPCServer() if self.drop_down else DropdownIPCServer(instance_socket_path());
+        self._tray_process=None;
         self._last_title="";
         self.font=None;
         self.bold_font=None;
         self.small_font=None;
         self.small_bold_font=None;
+        self.fallback_font=None;
+        self.fallback_bold_font=None;
+        self.fallback_small_font=None;
+        self.fallback_small_bold_font=None;
         self.header_font=None;
         self.toolbar_height=28;
         self.tabbar_height=30;
@@ -210,7 +215,7 @@ class GuiTerminalView:
         return " ".join("{:02x}".format(value) for value in bytes(data or b""));
 
     def _render_signature(self):
-        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size),int(self._font_zoom),bool(getattr(self.preferences.general,"font_bold",False)),bool(getattr(self.preferences.general,"font_italic",False)),bool(getattr(self.preferences.general,"font_small_caps",False)),float(getattr(self.preferences.general,"font_small_caps_scale",DEFAULT_SMALL_CAPS_SCALE)));
+        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size),int(self._font_zoom),bool(getattr(self.preferences.general,"font_bold",False)),bool(getattr(self.preferences.general,"font_italic",False)),bool(getattr(self.preferences.general,"font_small_caps",False)),float(getattr(self.preferences.general,"font_small_caps_scale",DEFAULT_SMALL_CAPS_SCALE)),int(getattr(self.preferences.general,"font_uppercase_embolden",0)),int(getattr(self.preferences.general,"font_lowercase_embolden",0)));
 
     @staticmethod
     def _max_scroll_offset(tab):
@@ -356,6 +361,12 @@ class GuiTerminalView:
         small_size=max(6,int(round(size*small_scale)));
         self.small_font=make_font(effective,small_size,False,italic) if small_caps else None;
         self.small_bold_font=make_font(effective,small_size,True,italic) if small_caps else None;
+        # A per-glyph monospace fallback preserves box-drawing/Unicode symbols
+        # when an otherwise attractive terminal font does not contain them.
+        self.fallback_font=make_font("monospace",size,False,italic);
+        self.fallback_bold_font=make_font("monospace",size,True,italic);
+        self.fallback_small_font=make_font("monospace",small_size,False,italic) if small_caps else None;
+        self.fallback_small_bold_font=make_font("monospace",small_size,True,italic) if small_caps else None;
         self.header_font=pygame.font.SysFont("sans",max(12,min(18,size-2)));
         self.toolbar_height=max(28,self.header_font.get_linesize()+8);
         self.tabbar_height=max(28,self.header_font.get_linesize()+8);
@@ -391,6 +402,51 @@ class GuiTerminalView:
         except Exception: width=int(cell_width);
         return int(round((int(cell_width)-width)/2.0));
 
+
+    @staticmethod
+    def _embolden_surface(pygame,rendered,amount):
+        amount=max(0,min(3,int(amount)));
+        if amount<=0: return rendered;
+        try:
+            surface=pygame.Surface((rendered.get_width()+amount,rendered.get_height()),pygame.SRCALPHA); surface.fill((0,0,0,0));
+            for shift in range(amount+1): surface.blit(rendered,(shift,0));
+            return surface;
+        except Exception: return rendered;
+
+    def _glyph_y_offset(self,renderer,glyph,rendered,small=False):
+        """Align every glyph to the same cell baseline, including accents/fallbacks.""";
+        fallback=self.small_glyph_offset_y if small else self.glyph_offset_y;
+        try:
+            metrics=renderer.metrics(str(glyph)); metric=metrics[0] if metrics else None; bounds=rendered.get_bounding_rect(min_alpha=1);
+            if metric is not None and int(bounds.height)>0:
+                _minx,_maxx,_miny,maxy,_advance=metric;
+                if maxy is not None: return int(round(self.glyph_baseline_y-int(maxy)-int(bounds.y)));
+        except Exception: pass;
+        return fallback;
+
+    @staticmethod
+    def _font_has_glyph(renderer,glyph):
+        try:
+            metrics=renderer.metrics(str(glyph)); return bool(metrics and metrics[0] is not None);
+        except Exception: return True;
+
+    def _fallback_renderer(self,small,bold):
+        if small:
+            return self.fallback_small_bold_font if bold and self.fallback_small_bold_font is not None else self.fallback_small_font;
+        return self.fallback_bold_font if bold and self.fallback_bold_font is not None else self.fallback_font;
+
+    def _render_cell_glyph(self,pygame,char,bold,color,cell_width):
+        renderer,glyph,small=self._glyph_for_cell(char,bold); fallback=False;
+        if renderer is not None and not self._font_has_glyph(renderer,glyph):
+            substitute=self._fallback_renderer(small,bold);
+            if substitute is not None: renderer=substitute; fallback=True;
+        rendered=renderer.render(glyph,True,color);
+        if str(char).islower(): amount=int(getattr(self.preferences.general,"font_lowercase_embolden",0));
+        elif str(char).isupper(): amount=int(getattr(self.preferences.general,"font_uppercase_embolden",0));
+        else: amount=0;
+        rendered=self._embolden_surface(pygame,rendered,amount); center=bool(small or fallback or amount>0); xoff=self._small_caps_x_offset(rendered,cell_width) if center else 0; yoff=self._glyph_y_offset(renderer,glyph,rendered,small=small);
+        return rendered,xoff,yoff;
+
     def _glyph_for_cell(self,char,bold=False):
         use_small=bool(getattr(self.preferences.general,"font_small_caps",False) and str(char).islower());
         glyph=str(char);
@@ -403,13 +459,35 @@ class GuiTerminalView:
             return renderer or (self.bold_font if bold and self.bold_font is not None else self.font),glyph,True;
         return self.bold_font if bold and self.bold_font is not None else self.font,glyph,False;
 
+    def _start_tray(self):
+        if not bool(getattr(self.preferences.general,"show_tray",True)): return False;
+        if self._tray_process is not None and self._tray_process.poll() is None: return True;
+        if self.ipc is None: return False;
+        command=[sys.executable,"-m","sumterminal.tray","--socket",str(self.ipc.path),"--parent-pid",str(os.getpid())];
+        try:
+            self._tray_process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);
+            return True;
+        except OSError: self._tray_process=None; return False;
+
+    def _stop_tray(self):
+        process=self._tray_process; self._tray_process=None;
+        if process is None: return False;
+        if process.poll() is None:
+            try: process.terminate(); process.wait(timeout=0.5);
+            except Exception:
+                try: process.kill();
+                except Exception: pass;
+        return True;
+
     def _reload_preferences(self,pygame):
         previous=self.preferences; surface=pygame.display.get_surface(); previous_size=surface.get_size() if surface is not None else None;
         self.preferences=load_preferences().normalized(); self._font_zoom=0; self._reload_theme(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame); target_size=(width,height);
         geometry_changed=previous_size!=target_size; opacity_changed=float(previous.dropdown.opacity)!=float(self.preferences.dropdown.opacity); position_changed=str(previous.dropdown.position)!=str(self.preferences.dropdown.position);
         if geometry_changed: pygame.display.set_mode(target_size,self._flags);
         if geometry_changed or opacity_changed or position_changed: self._apply_window_properties(pygame);
-        self._update_size(pygame,self.font,self.header_height); self._force_redraw=True;
+        self._update_size(pygame,self.font,self.header_height); self._force_redraw=True; self._last_render_signature=None;
+        if bool(getattr(self.preferences.general,"show_tray",True)): self._start_tray();
+        else: self._stop_tray();
 
     def _open_preferences(self):
         if self._preferences_process is not None and self._preferences_process.poll() is None: return;
@@ -592,14 +670,14 @@ class GuiTerminalView:
                 if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y,cell_w,cell_h));
                 char=cell.char or " ";
                 if char!=" ":
-                    renderer,glyph,small=self._glyph_for_cell(char,cell.bold); rendered=renderer.render(glyph,True,shown_fg); xoff=self._small_caps_x_offset(rendered,cell_w) if small else 0; yoff=self.small_glyph_offset_y if small else self.glyph_offset_y; surface.blit(rendered,(x+xoff,y+yoff));
+                    rendered,xoff,yoff=self._render_cell_glyph(pygame,char,cell.bold,shown_fg,cell_w); surface.blit(rendered,(x+xoff,y+yoff));
                 if cell.underline: pygame.draw.line(surface,shown_fg,(x,y+cell_h-2),(x+cell_w,y+cell_h-2),1);
         if tab.scroll_offset==0 and self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
             col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h+self.glyph_offset_y; cursor_h=min(cell_h,self.glyph_height); pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cursor_h));
             try: cell=self.screen_model.lines[self.screen_model.row][col]; char=cell.char;
             except (IndexError,AttributeError): cell=None; char=" ";
             if char and char!=" ":
-                renderer,glyph,small=self._glyph_for_cell(char,bool(cell is not None and cell.bold)); rendered=renderer.render(glyph,True,self.screen_model.default_bg); xoff=self._small_caps_x_offset(rendered,cell_w) if small else 0; yoff=(self.small_glyph_offset_y-self.glyph_offset_y) if small else 0; surface.blit(rendered,(x+xoff,y+yoff));
+                rendered,xoff,yoff=self._render_cell_glyph(pygame,char,bool(cell is not None and cell.bold),self.screen_model.default_bg,cell_w); surface.blit(rendered,(x+xoff,y0+self.screen_model.row*cell_h+yoff));
 
     def _cell_from_pos(self,pos):
         x,y=pos;
@@ -746,6 +824,16 @@ class GuiTerminalView:
             self._update_size(pygame,self.font,self.header_height);
             self._force_redraw=True;
             return True;
+        redraw_events=tuple(value for value in (getattr(pygame,"WINDOWSHOWN",None),getattr(pygame,"WINDOWRESTORED",None),getattr(pygame,"WINDOWEXPOSED",None),getattr(pygame,"VIDEOEXPOSE",None)) if value is not None);
+        resize_events=tuple(value for value in (getattr(pygame,"WINDOWRESIZED",None),getattr(pygame,"WINDOWSIZECHANGED",None)) if value is not None);
+        if event.type in resize_events:
+            self._update_size(pygame,self.font,self.header_height); self._last_render_signature=None; self._force_redraw=True; return True;
+        if event.type in redraw_events:
+            self._update_size(pygame,self.font,self.header_height); self._last_render_signature=None; self._force_redraw=True;
+            if self.visible:
+                try: self._render_frame(pygame);
+                except Exception: pass;
+            return True;
         if event.type==getattr(pygame,"MOUSEWHEEL",-999):
             mods=pygame.key.get_mods(); state=pygame_modifier_state(mods,pygame); amount=int(getattr(event,"y",0) or 0);
             if state["ctrl"] and not state["altgr"] and amount:
@@ -862,6 +950,7 @@ class GuiTerminalView:
         pygame.init(); pygame.key.set_repeat(400,35); width,height,x,y=self._geometry(pygame); os.environ.setdefault("SDL_VIDEO_WINDOW_POS","{},{}".format(x,y)); self._flags=pygame.RESIZABLE | (pygame.NOFRAME if self.drop_down else 0); pygame.display.set_mode((width,height),self._flags); set_default_icon(); self._apply_window_properties(pygame);
         self._reload_theme(); theme=self.theme; self._make_fonts(pygame); self._preferences_rect=pygame.Rect(0,0,0,0); self._new_tab_rect=pygame.Rect(0,0,0,0); self._update_size(pygame,self.font,self.header_height);
         if self.ipc is not None: self.ipc.start();
+        self._start_tray();
         if self.start_hidden: self._set_visible(False);
         clock=pygame.time.Clock(); self.running=True; exit_code=0;
         try:
@@ -886,6 +975,9 @@ class GuiTerminalView:
                             if command=="toggle": self.toggle_visible();
                             elif command=="show": self._set_visible(True);
                             elif command=="hide": self._set_visible(False);
+                            elif command=="new-tab": self._new_tab(); self._set_visible(True);
+                            elif command=="preferences": self._open_preferences(); self._set_visible(True);
+                            elif command=="noop": pass;
                             elif command=="reload":
                                 if self._preferences_process is not None and self._preferences_process.poll() is None: self._preferences_reload_pending=True;
                                 else: self._reload_preferences(pygame);
@@ -922,6 +1014,7 @@ class GuiTerminalView:
                     self._record_runtime_error("terminal renderer",exc);
                     self._render_emergency_frame(pygame);
         finally:
+            self._stop_tray();
             if self.ipc is not None: self.ipc.close();
             for tab in list(self._tabs):
                 if tab.session.poll() is None: tab.session.terminate();

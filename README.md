@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a20
+# sumTerminal 0.1.0a22
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -183,3 +183,10 @@ Terminal Preferences now consumes the reusable SumGUI `FontPicker`. Monospaced f
 ## Runtime font zoom and live FontPicker preview (0.1.0a21)
 
 Preferences uses SumGUI FontPicker with a live sample and an adjustable Small Caps scale (50–85%, default 65%). The scale affects rendering only; terminal text remains unchanged. Runtime zoom is transient: `Ctrl++` / `Ctrl+=` and `Ctrl+-` change the current view by one point, `Ctrl+0` returns to the saved font size, and `Ctrl+mouse-wheel` zooms without forwarding the wheel to the PTY. Each change rebuilds font metrics, terminal cell geometry, cursor geometry and PTY rows/columns.
+
+
+## Preferences, restore redraw and tray (0.1.0a22)
+
+Preferences now use a vertically scrollable body with fixed action buttons.  The FontPicker exposes Small Caps scale plus independent uppercase and lowercase/Small-Caps optical embolden values and a live baseline-aligned preview.  Missing glyphs are rendered from a monospace fallback so box-drawing characters can survive otherwise suitable fonts.
+
+Window expose/show/restore events force an immediate full redraw, including a PTY geometry refresh when required.  On Linux/XFCE, the optional `Σtl` tray helper uses GTK's legacy status-icon bridge (accepted by XFCE's Status Tray alongside StatusNotifier items) without requiring Python GI bindings.  Left-click toggles the window; the tray menu provides Show/Hide, New terminal tab, Preferences and Quit.

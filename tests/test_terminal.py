@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a21" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a22" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -157,6 +157,9 @@ def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
     assert loaded.general.font_bold is False;
     assert loaded.general.font_italic is False;
     assert loaded.general.font_small_caps is False;
+    assert loaded.general.font_uppercase_embolden==0;
+    assert loaded.general.font_lowercase_embolden==0;
+    assert loaded.general.show_tray is True;
     assert loaded.general.shell=="sumbash";
 
 
@@ -997,3 +1000,59 @@ def test_ctrl_mousewheel_zooms_before_child_mouse_tracking(monkeypatch):
     event=SimpleNamespace(type=pygame.MOUSEWHEEL,y=1);
     assert view._handle_pygame_event(pygame,event) is True;
     assert calls==[1]; assert written==[];
+
+
+
+def test_preferences_persist_case_weights_and_tray(tmp_path):
+    from sumterminal.config import TerminalPreferences, load_preferences, save_preferences;
+    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); value.general.font_uppercase_embolden=1; value.general.font_lowercase_embolden=2; value.general.show_tray=False; save_preferences(value,path); loaded=load_preferences(path);
+    assert loaded.general.font_uppercase_embolden==1; assert loaded.general.font_lowercase_embolden==2; assert loaded.general.show_tray is False;
+
+
+def test_instance_socket_path_is_process_specific(tmp_path):
+    from sumterminal.ipc import instance_socket_path;
+    env={"XDG_RUNTIME_DIR":str(tmp_path)}; first=instance_socket_path(123,env=env); second=instance_socket_path(124,env=env);
+    assert first!=second; assert first.name.endswith("-123.sock"); assert second.name.endswith("-124.sock");
+
+
+def test_glyph_baseline_uses_font_metrics_for_accented_characters():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=TerminalPreferences()); view.glyph_baseline_y=14; view.glyph_offset_y=3; view.small_glyph_offset_y=5;
+    class Renderer:
+        @staticmethod
+        def metrics(text): return [(0,8,0,11,8)] if text=="Á" else [(0,8,0,8,8)];
+    class Rendered:
+        @staticmethod
+        def get_bounding_rect(min_alpha=1): return SimpleNamespace(y=1,height=10);
+    assert view._glyph_y_offset(Renderer(),"Á",Rendered(),small=False)==2;
+    assert view._glyph_y_offset(Renderer(),"A",Rendered(),small=False)==5;
+
+
+def test_missing_glyph_detection_allows_monospace_fallback():
+    from sumterminal.gui import GuiTerminalView;
+    class Missing:
+        @staticmethod
+        def metrics(text): return [None];
+    class Present:
+        @staticmethod
+        def metrics(text): return [(0,8,0,8,8)];
+    assert GuiTerminalView._font_has_glyph(Missing(),"┌") is False;
+    assert GuiTerminalView._font_has_glyph(Present(),"┌") is True;
+
+
+def test_restore_event_invalidates_and_redraws(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=TerminalPreferences()); view.visible=True; view._last_render_signature=("old",); calls=[];
+    monkeypatch.setattr(view,"_update_size",lambda *args:calls.append("resize")); monkeypatch.setattr(view,"_render_frame",lambda *args:calls.append("draw") or True);
+    fake=SimpleNamespace(KEYDOWN=90,K_ESCAPE=27,QUIT=1,VIDEORESIZE=2,WINDOWSHOWN=3,WINDOWRESTORED=4,WINDOWEXPOSED=5,VIDEOEXPOSE=6,WINDOWRESIZED=7,WINDOWSIZECHANGED=8);
+    event=SimpleNamespace(type=4);
+    assert view._handle_pygame_event(fake,event) is True; assert view._last_render_signature is None; assert view._force_redraw is True; assert calls==["resize","draw"];
+
+
+def test_tray_asset_is_packaged():
+    from sumterminal.tray import tray_icon_path;
+    assert os.path.exists(tray_icon_path());

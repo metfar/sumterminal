@@ -33,6 +33,12 @@ def socket_path(env=None):
     return Path(root)/"sumterminal-{}-dropdown.sock".format(uid);
 
 
+def instance_socket_path(pid=None,env=None):
+    values=os.environ if env is None else env; root=values.get("XDG_RUNTIME_DIR") or tempfile.gettempdir();
+    uid=getattr(os,"getuid",lambda:0)(); process_id=int(pid or os.getpid());
+    return Path(root)/"sumterminal-{}-{}.sock".format(uid,process_id);
+
+
 def send_command(command,path=None,timeout=0.35):
     target=str(path or socket_path()); client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); client.settimeout(float(timeout));
     try:

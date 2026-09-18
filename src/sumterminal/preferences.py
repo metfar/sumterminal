@@ -53,12 +53,13 @@ def show_preferences(preferences=None):
         warnings.filterwarnings("ignore",message=r"Your system is avx2 capable.*",category=RuntimeWarning);
         warnings.filterwarnings("ignore",message=r"pkg_resources is deprecated as an API.*",category=UserWarning);
         import pygame;
-        from sumgui.easy import app, button, label, slider, start, window;
+        from sumgui.easy import app, start, window;
         from sumgui.fontpicker import FontPicker;
-        from sumgui.widgets import TextInput;
+        from sumgui.widgets import Button, CheckBox, Label, ScrollPanel, Slider, TextInput;
     except ImportError as exc: raise RuntimeError("sumTerminal preferences require sumGUI/Pygame") from exc;
     value.general.theme=canonical_theme_name(value.general.theme); themes=list(available_terminal_themes());
-    current=window("SUM Terminal Preferences",width=760,height=950,base_width=760,base_height=950,theme=gui_theme(value.general.theme),font_name=value.general.font_name,font_size=18);
+    current=window("SUM Terminal Preferences",width=760,height=820,base_width=760,base_height=820,theme=gui_theme(value.general.theme),font_name=value.general.font_name,font_size=18);
+
     class ShortcutInput(TextInput):
         def __init__(self,*args,**kwargs):
             super().__init__(*args,**kwargs); self.capturing=False; self._before=self.value();
@@ -82,34 +83,66 @@ def show_preferences(preferences=None):
                 self.capturing=False; return True;
             if self.capturing: return True;
             return super().handle_event(event);
-    label("SUM Terminal Preferences",28,18,650,42,font_size=26,bold=True);
-    label("General",28,72,650,34,font_size=20,bold=True);
-    label("Default shell",28,116,200,34); shell=current.add(TextInput(current.rect(270,110,440,42),current.font,text=value.general.shell,placeholder="sumbash / bash -l / zsh / pwsh ...",max_length=160,theme=current.theme));
-    label("Appearance",28,172,650,34,font_size=20,bold=True);
-    label("Theme",28,216,200,34); theme_name=current.add(TextInput(current.rect(270,210,318,42),current.font,text=value.general.theme,placeholder="Dark / ZX / DOS / user theme",max_length=96,theme=current.theme));
+
+    def root_rect(x,y,w,h): return current.rect(x,y,w,h);
+    def local_rect(x,y,w,h): return pygame.Rect(current.w(x),current.h(y),current.w(w),current.h(h));
+    def font(size=18,bold=False): return current.make_font(size,bold=bold);
+    def body_label(text,x,y,w=220,h=34,size=18,bold=False): return body.add(Label(local_rect(x,y,w,h),text,font(size,bold),current.theme));
+    def body_button(text,x,y,w,h,callback):
+        def clicked(_widget): callback();
+        return body.add(Button(local_rect(x,y,w,h),text,font(18,True),clicked,current.theme));
+
+    current.add(Label(root_rect(28,16,680,42),"SUM Terminal Preferences",font(26,True),current.theme));
+    body=current.add(ScrollPanel(root_rect(20,68,720,640),content_height=current.h(1000),theme=current.theme,scrollbar_width=current.w(16),wheel_step=current.h(52)));
+
+    body_label("General",8,8,650,34,20,True);
+    body_label("Default shell",8,50,220,34); shell=body.add(TextInput(local_rect(242,44,430,42),current.font,text=value.general.shell,placeholder="sumbash / bash -l / zsh / pwsh ...",max_length=160,theme=current.theme));
+
+    body_label("Appearance",8,104,650,34,20,True);
+    body_label("Theme",8,146,220,34); theme_name=body.add(TextInput(local_rect(242,140,308,42),current.font,text=value.general.theme,placeholder="Dark / ZX / DOS / user theme",max_length=96,theme=current.theme));
     def cycle_theme(step):
         names=list(available_terminal_themes());
         if not names: return;
         wanted=str(theme_name.value() or value.general.theme).casefold(); index=next((pos for pos,item in enumerate(names) if str(item).casefold()==wanted),0); theme_name.set_value(names[(index+int(step))%len(names)]);
-    button("<",598,210,50,42,do=lambda:cycle_theme(-1)); button(">",658,210,50,42,do=lambda:cycle_theme(1));
-    label("Font",28,270,200,34);
-    font_picker=current.add(FontPicker(current.rect(270,264,440,220),current.font,family=value.general.font_name,bold=value.general.font_bold,italic=value.general.font_italic,small_caps=value.general.font_small_caps,small_caps_scale=value.general.font_small_caps_scale,theme=current.theme,monospace_only=True,max_rows=9,show_scale=True,preview=True,preview_size=22));
-    label("Font size",28,494,200,34); font_size=slider("{} pt".format(value.general.font_size),270,486,440,50,minimum=8,maximum=48,value=value.general.font_size,step=1);
-    label("Drop-down",28,546,650,34,font_size=20,bold=True);
-    label("Shortcut",28,584,230,34); shortcut=current.add(ShortcutInput(current.rect(270,578,440,42),current.font,text=value.dropdown.shortcut,placeholder="Click, then press shortcut",max_length=48,theme=current.theme));
-    label("Height",28,636,190,34); height=slider("{}%".format(value.dropdown.height),270,628,440,50,minimum=10,maximum=100,value=value.dropdown.height,step=1);
-    label("Width",28,688,190,34); width=slider("{}%".format(value.dropdown.width),270,680,440,50,minimum=20,maximum=100,value=value.dropdown.width,step=1);
-    label("Opacity",28,740,190,34); opacity=slider("{}%".format(int(round(value.dropdown.opacity*100))),270,732,440,50,minimum=20,maximum=100,value=value.dropdown.opacity*100,step=1);
-    status=label("Fonts filter as you type. Ctrl++ / Ctrl+- zoom; Ctrl+0 resets to the saved size.",28,790,684,48,font_size=15);
+    body_button("<",560,140,50,42,lambda:cycle_theme(-1)); body_button(">",620,140,50,42,lambda:cycle_theme(1));
+
+    body_label("Font",8,200,220,34);
+    font_picker=body.add(FontPicker(local_rect(242,194,430,220),current.font,family=value.general.font_name,bold=value.general.font_bold,italic=value.general.font_italic,small_caps=value.general.font_small_caps,small_caps_scale=value.general.font_small_caps_scale,uppercase_embolden=value.general.font_uppercase_embolden,lowercase_embolden=value.general.font_lowercase_embolden,theme=current.theme,monospace_only=True,max_rows=9,show_scale=True,show_weights=True,preview=True,preview_size=22));
+    # Local rectangles are already expressed in scaled content coordinates.
+    font_size_top=font_picker.rect.bottom+current.h(10);
+    body.add(Label(pygame.Rect(current.w(8),font_size_top,current.w(220),current.h(34)),"Font size",font(18),current.theme));
+    font_size=body.add(Slider(pygame.Rect(current.w(242),font_size_top-current.h(8),current.w(430),current.h(50)),minimum=8,maximum=48,value=value.general.font_size,step=1,font=current.font,label="{} pt".format(value.general.font_size),theme=current.theme));
+    tray_top=font_size_top+current.h(58);
+    show_tray=body.add(CheckBox(pygame.Rect(current.w(242),tray_top,current.w(430),current.h(38)),"Show systray icon (Σtl)",current.font,checked=value.general.show_tray,theme=current.theme));
+
+    dropdown_top=tray_top+current.h(60);
+    body.add(Label(pygame.Rect(current.w(8),dropdown_top,current.w(650),current.h(34)),"Drop-down",font(20,True),current.theme));
+    y=dropdown_top+current.h(42);
+    body.add(Label(pygame.Rect(current.w(8),y,current.w(220),current.h(34)),"Shortcut",font(18),current.theme)); shortcut=body.add(ShortcutInput(pygame.Rect(current.w(242),y-current.h(6),current.w(430),current.h(42)),current.font,text=value.dropdown.shortcut,placeholder="Click, then press shortcut",max_length=48,theme=current.theme));
+    y+=current.h(54);
+    body.add(Label(pygame.Rect(current.w(8),y,current.w(190),current.h(34)),"Height",font(18),current.theme)); height=body.add(Slider(pygame.Rect(current.w(242),y-current.h(8),current.w(430),current.h(50)),minimum=10,maximum=100,value=value.dropdown.height,step=1,font=current.font,label="{}%".format(value.dropdown.height),theme=current.theme));
+    y+=current.h(54);
+    body.add(Label(pygame.Rect(current.w(8),y,current.w(190),current.h(34)),"Width",font(18),current.theme)); width=body.add(Slider(pygame.Rect(current.w(242),y-current.h(8),current.w(430),current.h(50)),minimum=20,maximum=100,value=value.dropdown.width,step=1,font=current.font,label="{}%".format(value.dropdown.width),theme=current.theme));
+    y+=current.h(54);
+    body.add(Label(pygame.Rect(current.w(8),y,current.w(190),current.h(34)),"Opacity",font(18),current.theme)); opacity=body.add(Slider(pygame.Rect(current.w(242),y-current.h(8),current.w(430),current.h(50)),minimum=20,maximum=100,value=value.dropdown.opacity*100,step=1,font=current.font,label="{}%".format(int(round(value.dropdown.opacity*100))),theme=current.theme));
+    body.set_content_height(y+current.h(72));
+
+    status=current.add(Label(root_rect(28,716,684,34),"Font preview is live. Mouse wheel scrolls this panel.",font(14),current.theme));
+
     def save(close=False):
         try:
             shell_value=str(shell.value() or "sumbash").strip();
             if not shell_value: shell_value="sumbash";
             if shell_value.casefold()!="sumbash" and not shlex.split(shell_value): raise ValueError("default shell command is empty");
-            font_selection=font_picker.selection(); value.general.shell=shell_value; value.general.theme=canonical_theme_name(theme_name.value(),strict=True); value.general.font_name=str(font_selection.family or "monospace").strip(); value.general.font_bold=bool(font_selection.bold); value.general.font_italic=bool(font_selection.italic); value.general.font_small_caps=bool(font_selection.small_caps); value.general.font_small_caps_scale=float(font_selection.small_caps_scale); value.general.font_size=int(round(font_size.value)); value.dropdown.shortcut=normalize_shortcut(shortcut.value() or getattr(shortcut,"_before","") or value.dropdown.shortcut); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
+            font_selection=font_picker.selection(); value.general.shell=shell_value; value.general.theme=canonical_theme_name(theme_name.value(),strict=True); value.general.font_name=str(font_selection.family or "monospace").strip(); value.general.font_bold=bool(font_selection.bold); value.general.font_italic=bool(font_selection.italic); value.general.font_small_caps=bool(font_selection.small_caps); value.general.font_small_caps_scale=float(font_selection.small_caps_scale); value.general.font_uppercase_embolden=int(font_selection.uppercase_embolden); value.general.font_lowercase_embolden=int(font_selection.lowercase_embolden); value.general.font_size=int(round(font_size.value)); value.general.show_tray=bool(show_tray.checked); value.dropdown.shortcut=normalize_shortcut(shortcut.value() or getattr(shortcut,"_before","") or value.dropdown.shortcut); value.dropdown.height=int(round(height.value)); value.dropdown.width=int(round(width.value)); value.dropdown.opacity=float(opacity.value)/100.0; path=save_preferences(value); result=install_dropdown_shortcut(value,apply=True);
             send_command("reload"); status.text="Saved {} — {}. Active terminal applies after Preferences closes.".format(path,result.detail);
             if close: app().running=False;
         except Exception as exc:
             status.text="Could not apply preferences: {}".format(exc);
-    button("APPLY",310,870,180,54,do=lambda:save(False)); button("SAVE && CLOSE",510,870,200,54,do=lambda:save(True));
+
+    def root_button(text,x,y,w,h,callback):
+        def clicked(_widget): callback();
+        return current.add(Button(root_rect(x,y,w,h),text,font(18,True),clicked,current.theme));
+    root_button("APPLY",310,754,180,50,lambda:save(False)); root_button("SAVE && CLOSE",510,754,200,50,lambda:save(True));
     start(); return 0;
+
