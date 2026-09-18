@@ -179,3 +179,7 @@ Selection and clipboard support exchanges text with the system clipboard. Drag w
 ## FontPicker preferences (0.1.0a20)
 
 Terminal Preferences now consumes the reusable SumGUI `FontPicker`. Monospaced font families are sorted alphabetically and the editable combo filters by case-insensitive substring as you type. The dropdown includes a vertical scrollbar linked to the mouse wheel and supports thumb dragging, track paging and keyboard PageUp/PageDown/Home/End. Bold, Italic and Small Caps are persisted in `terminal.toml`. Small Caps is a presentation mode: lowercase input remains lowercase in the PTY/screen model and is rendered as a 65% uppercase glyph, centered by its visible ink inside the unchanged terminal cell and aligned to the same baseline as normal capitals. The underlying text is preserved.
+
+## Runtime font zoom and live FontPicker preview (0.1.0a21)
+
+Preferences uses SumGUI FontPicker with a live sample and an adjustable Small Caps scale (50–85%, default 65%). The scale affects rendering only; terminal text remains unchanged. Runtime zoom is transient: `Ctrl++` / `Ctrl+=` and `Ctrl+-` change the current view by one point, `Ctrl+0` returns to the saved font size, and `Ctrl+mouse-wheel` zooms without forwarding the wheel to the PTY. Each change rebuilds font metrics, terminal cell geometry, cursor geometry and PTY rows/columns.

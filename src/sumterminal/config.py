@@ -36,6 +36,7 @@ class GeneralPreferences:
     font_bold: bool=False;
     font_italic: bool=False;
     font_small_caps: bool=False;
+    font_small_caps_scale: float=0.65;
 
 
 @dataclass
@@ -64,6 +65,7 @@ class TerminalPreferences:
         self.general.font_bold=bool(self.general.font_bold);
         self.general.font_italic=bool(self.general.font_italic);
         self.general.font_small_caps=bool(self.general.font_small_caps);
+        self.general.font_small_caps_scale=max(0.50,min(0.85,float(self.general.font_small_caps_scale)));
         try: self.dropdown.shortcut=normalize_shortcut(self.dropdown.shortcut or "Ctrl+F12");
         except (TypeError,ValueError): self.dropdown.shortcut="Ctrl+F12";
         self.dropdown.height=max(10,min(100,int(self.dropdown.height)));
@@ -96,7 +98,7 @@ def _toml_value(value):
 
 def _serialize(preferences):
     value=preferences.normalized();
-    lines=["[general]","frontend = {}".format(_toml_value(value.general.frontend)),"shell = {}".format(_toml_value(value.general.shell)),"theme = {}".format(_toml_value(value.general.theme)),"font_name = {}".format(_toml_value(value.general.font_name)),"font_size = {}".format(_toml_value(value.general.font_size)),"font_bold = {}".format(_toml_value(value.general.font_bold)),"font_italic = {}".format(_toml_value(value.general.font_italic)),"font_small_caps = {}".format(_toml_value(value.general.font_small_caps)),"","[dropdown]","shortcut = {}".format(_toml_value(value.dropdown.shortcut)),"height = {}".format(_toml_value(value.dropdown.height)),"width = {}".format(_toml_value(value.dropdown.width)),"opacity = {}".format(_toml_value(value.dropdown.opacity)),"monitor = {}".format(_toml_value(value.dropdown.monitor)),"position = {}".format(_toml_value(value.dropdown.position)),"hide_on_focus_loss = {}".format(_toml_value(value.dropdown.hide_on_focus_loss)),"animation = {}".format(_toml_value(value.dropdown.animation)),""];
+    lines=["[general]","frontend = {}".format(_toml_value(value.general.frontend)),"shell = {}".format(_toml_value(value.general.shell)),"theme = {}".format(_toml_value(value.general.theme)),"font_name = {}".format(_toml_value(value.general.font_name)),"font_size = {}".format(_toml_value(value.general.font_size)),"font_bold = {}".format(_toml_value(value.general.font_bold)),"font_italic = {}".format(_toml_value(value.general.font_italic)),"font_small_caps = {}".format(_toml_value(value.general.font_small_caps)),"font_small_caps_scale = {}".format(_toml_value(value.general.font_small_caps_scale)),"","[dropdown]","shortcut = {}".format(_toml_value(value.dropdown.shortcut)),"height = {}".format(_toml_value(value.dropdown.height)),"width = {}".format(_toml_value(value.dropdown.width)),"opacity = {}".format(_toml_value(value.dropdown.opacity)),"monitor = {}".format(_toml_value(value.dropdown.monitor)),"position = {}".format(_toml_value(value.dropdown.position)),"hide_on_focus_loss = {}".format(_toml_value(value.dropdown.hide_on_focus_loss)),"animation = {}".format(_toml_value(value.dropdown.animation)),""];
     return "\n".join(lines);
 
 
@@ -135,7 +137,7 @@ def load_preferences(path=None):
     try: data=_load_toml(target);
     except (OSError,ValueError): return value.normalized();
     general=dict(data.get("general",{}) or {}); dropdown=dict(data.get("dropdown",{}) or {});
-    for key in ("frontend","shell","theme","font_name","font_size","font_bold","font_italic","font_small_caps"):
+    for key in ("frontend","shell","theme","font_name","font_size","font_bold","font_italic","font_small_caps","font_small_caps_scale"):
         if key in general: setattr(value.general,key,general[key]);
     for key in ("shortcut","height","width","opacity","monitor","position","hide_on_focus_loss","animation"):
         if key in dropdown: setattr(value.dropdown,key,dropdown[key]);

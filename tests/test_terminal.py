@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a20" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a21" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -777,7 +777,7 @@ def test_terminal_bracketed_paste_wraps_clipboard_text():
 
 def _fake_pygame_for_input(modifiers=0):
     from types import SimpleNamespace;
-    names=("K_RETURN","K_BACKSPACE","K_TAB","K_ESCAPE","K_UP","K_DOWN","K_RIGHT","K_LEFT","K_HOME","K_END","K_PAGEUP","K_PAGEDOWN","K_INSERT","K_DELETE","K_F1","K_F2","K_F3","K_F4","K_F5","K_F6","K_F7","K_F8","K_F9","K_F10","K_F11","K_F12","K_SPACE","K_COMMA","K_c","K_v","K_t");
+    names=("K_RETURN","K_BACKSPACE","K_TAB","K_ESCAPE","K_UP","K_DOWN","K_RIGHT","K_LEFT","K_HOME","K_END","K_PAGEUP","K_PAGEDOWN","K_INSERT","K_DELETE","K_F1","K_F2","K_F3","K_F4","K_F5","K_F6","K_F7","K_F8","K_F9","K_F10","K_F11","K_F12","K_SPACE","K_COMMA","K_c","K_v","K_t","K_EQUALS","K_PLUS","K_KP_PLUS","K_MINUS","K_KP_MINUS","K_0","K_KP0");
     values={name:index+100 for index,name in enumerate(names)};
     key_api=SimpleNamespace(get_mods=lambda:modifiers,name=lambda key:"," if key==values["K_COMMA"] else ".");
     return SimpleNamespace(KEYDOWN=1,KEYUP=9,QUIT=2,VIDEORESIZE=3,MOUSEWHEEL=4,MOUSEBUTTONDOWN=5,MOUSEBUTTONUP=6,MOUSEMOTION=7,TEXTINPUT=8,KMOD_SHIFT=1,KMOD_CTRL=2,KMOD_LALT=4,KMOD_RALT=8,KMOD_ALT=12,KMOD_MODE=16,KMOD_GUI=32,K_RALT=901,K_MODE=902,key=key_api,**values);
@@ -878,11 +878,12 @@ def test_physical_right_alt_shift_level4_text_reaches_pty():
 
 def test_preferences_persist_font_modifiers(tmp_path):
     from sumterminal.config import TerminalPreferences, load_preferences, save_preferences;
-    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); value.general.font_name="mono"; value.general.font_bold=True; value.general.font_italic=True; value.general.font_small_caps=True; save_preferences(value,path); loaded=load_preferences(path);
+    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); value.general.font_name="mono"; value.general.font_bold=True; value.general.font_italic=True; value.general.font_small_caps=True; value.general.font_small_caps_scale=0.61; save_preferences(value,path); loaded=load_preferences(path);
     assert loaded.general.font_name=="mono";
     assert loaded.general.font_bold is True;
     assert loaded.general.font_italic is True;
     assert loaded.general.font_small_caps is True;
+    assert loaded.general.font_small_caps_scale==0.61;
 
 
 def test_small_caps_maps_lowercase_to_smaller_uppercase_renderer():
@@ -927,10 +928,10 @@ def test_preferences_migrate_incomplete_shortcut_without_losing_other_settings(t
     assert loaded.general.font_size==21;
 
 
-def test_small_caps_geometry_is_65_percent_centered_and_baseline_aligned():
+def test_small_caps_geometry_uses_configured_scale_centered_and_baseline_aligned():
     from types import SimpleNamespace;
     from sumterminal.config import TerminalPreferences;
-    from sumterminal.gui import GuiTerminalView, SMALL_CAPS_SCALE;
+    from sumterminal.gui import GuiTerminalView;
     calls=[];
     class Rect:
         def __init__(self,x,width): self.x=x; self.width=width;
@@ -948,9 +949,8 @@ def test_small_caps_geometry_is_65_percent_centered_and_baseline_aligned():
         def SysFont(name,size,bold=False,italic=False): calls.append((name,size,bold,italic)); return FakeFont(name,size,bold,italic);
         @staticmethod
         def Font(path,size): return FakeFont(path,size);
-    fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; prefs.general.font_size=20; prefs.general.font_small_caps=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
-    assert SMALL_CAPS_SCALE==0.65;
-    assert any(call[1]==13 for call in calls);
+    fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; prefs.general.font_size=20; prefs.general.font_small_caps=True; prefs.general.font_small_caps_scale=0.60; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
+    assert any(call[1]==12 for call in calls);
     assert view.glyph_offset_y+view.font.get_ascent()==view.small_glyph_offset_y+view.small_font.get_ascent();
     assert view._small_caps_x_offset(Rendered(),10)==1;
 
@@ -972,3 +972,28 @@ def test_small_caps_does_not_change_cell_width():
         def Font(path,size): return FakeFont(size);
     fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_size=18; prefs.general.font_small_caps=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
     assert view.cell_width==9;
+
+
+def test_ctrl_plus_minus_zero_zoom_are_view_only(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    modifiers=2; pygame=_fake_pygame_for_input(modifiers); prefs=TerminalPreferences(); prefs.general.font_size=18; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); calls=[];
+    monkeypatch.setattr(view,"_zoom_font",lambda _pygame,delta:calls.append(("zoom",delta)) or 19);
+    monkeypatch.setattr(view,"_reset_font_zoom",lambda _pygame:calls.append(("reset",0)) or 18);
+    assert view._key_bytes(pygame,SimpleNamespace(key=pygame.K_EQUALS,mod=modifiers,unicode="+"))==b"";
+    assert view._key_bytes(pygame,SimpleNamespace(key=pygame.K_MINUS,mod=modifiers,unicode="-"))==b"";
+    assert view._key_bytes(pygame,SimpleNamespace(key=pygame.K_0,mod=modifiers,unicode="0"))==b"";
+    assert calls==[("zoom",1),("zoom",-1),("reset",0)];
+    assert prefs.general.font_size==18;
+
+
+def test_ctrl_mousewheel_zooms_before_child_mouse_tracking(monkeypatch):
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    pygame=_fake_pygame_for_input(2); written=[]; session=SimpleNamespace(size=TerminalSize(24,80),write=lambda data:written.append(data)); view=GuiTerminalView(session,preferences=TerminalPreferences()); view.running=True; view.screen_model.feed("\x1b[?1002h\x1b[?1006h"); calls=[];
+    monkeypatch.setattr(view,"_zoom_font",lambda _pygame,delta:calls.append(delta) or 19);
+    event=SimpleNamespace(type=pygame.MOUSEWHEEL,y=1);
+    assert view._handle_pygame_event(pygame,event) is True;
+    assert calls==[1]; assert written==[];

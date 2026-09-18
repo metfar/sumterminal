@@ -42,7 +42,7 @@ from sumui.keyboard import pygame_modifier_state;
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT","1");
 
 
-SMALL_CAPS_SCALE=0.65;
+DEFAULT_SMALL_CAPS_SCALE=0.65;
 
 
 def _prepare_pygame_runtime():
@@ -116,6 +116,7 @@ class GuiTerminalView:
         self._context_menu_rect=None;
         self._context_menu_items=[];
         self._altgr_down=False;
+        self._font_zoom=0;
         self.sum_theme=resolve_theme(self.preferences.general.theme);
         self.theme=None;
         self._runtime_error=None;
@@ -209,7 +210,7 @@ class GuiTerminalView:
         return " ".join("{:02x}".format(value) for value in bytes(data or b""));
 
     def _render_signature(self):
-        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size),bool(getattr(self.preferences.general,"font_bold",False)),bool(getattr(self.preferences.general,"font_italic",False)),bool(getattr(self.preferences.general,"font_small_caps",False)));
+        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size),int(self._font_zoom),bool(getattr(self.preferences.general,"font_bold",False)),bool(getattr(self.preferences.general,"font_italic",False)),bool(getattr(self.preferences.general,"font_small_caps",False)),float(getattr(self.preferences.general,"font_small_caps_scale",DEFAULT_SMALL_CAPS_SCALE)));
 
     @staticmethod
     def _max_scroll_offset(tab):
@@ -327,7 +328,7 @@ class GuiTerminalView:
         self._set_visible(not self.visible);
 
     def _make_fonts(self,pygame):
-        name=self.preferences.general.font_name; size=self.preferences.general.font_size;
+        name=self.preferences.general.font_name; size=max(8,min(72,int(self.preferences.general.font_size)+int(self._font_zoom)));
         base_bold=bool(getattr(self.preferences.general,"font_bold",False)); italic=bool(getattr(self.preferences.general,"font_italic",False)); small_caps=bool(getattr(self.preferences.general,"font_small_caps",False));
         def make_font(font_name,font_size,bold=False,italic_style=False):
             requested_bold=bool(base_bold or bold); requested_italic=bool(italic_style);
@@ -351,7 +352,8 @@ class GuiTerminalView:
             self.effective_font_name=name;
             self.bold_font=make_font(name,size,True,italic);
             effective=name;
-        small_size=max(6,int(round(size*SMALL_CAPS_SCALE)));
+        small_scale=max(0.50,min(0.85,float(getattr(self.preferences.general,"font_small_caps_scale",DEFAULT_SMALL_CAPS_SCALE))));
+        small_size=max(6,int(round(size*small_scale)));
         self.small_font=make_font(effective,small_size,False,italic) if small_caps else None;
         self.small_bold_font=make_font(effective,small_size,True,italic) if small_caps else None;
         self.header_font=pygame.font.SysFont("sans",max(12,min(18,size-2)));
@@ -403,7 +405,7 @@ class GuiTerminalView:
 
     def _reload_preferences(self,pygame):
         previous=self.preferences; surface=pygame.display.get_surface(); previous_size=surface.get_size() if surface is not None else None;
-        self.preferences=load_preferences().normalized(); self._reload_theme(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame); target_size=(width,height);
+        self.preferences=load_preferences().normalized(); self._font_zoom=0; self._reload_theme(); self._make_fonts(pygame); width,height,_,_=self._geometry(pygame); target_size=(width,height);
         geometry_changed=previous_size!=target_size; opacity_changed=float(previous.dropdown.opacity)!=float(self.preferences.dropdown.opacity); position_changed=str(previous.dropdown.position)!=str(self.preferences.dropdown.position);
         if geometry_changed: pygame.display.set_mode(target_size,self._flags);
         if geometry_changed or opacity_changed or position_changed: self._apply_window_properties(pygame);
@@ -447,6 +449,10 @@ class GuiTerminalView:
         if self._altgr_down and not state["altgr"]:
             state=dict(state); state["altgr"]=True; state["alt"]=False; state["ctrl"]=False;
         shift=state["shift"]; alt=state["alt"]; ctrl=state["ctrl"]; altgr=state["altgr"];
+        zoom_action=self._zoom_key_action(pygame,event,state);
+        if zoom_action==1: self._zoom_font(pygame,1); return b"";
+        if zoom_action==-1: self._zoom_font(pygame,-1); return b"";
+        if zoom_action==2: self._reset_font_zoom(pygame); return b"";
         if ctrl and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
         if ctrl and key==pygame.K_COMMA: self._open_preferences(); return b"";
         if ctrl and shift and key==getattr(pygame,"K_c",-999): self._copy_selection(); return b"";
@@ -461,6 +467,34 @@ class GuiTerminalView:
         if data and self.active_tab.scroll_offset: self.active_tab.scroll_offset=0; self._force_redraw=True;
         self._trace("KEYDOWN key={} semantic={} mod={} shift={} alt={} ctrl={} altgr={} text={!r} app_cursor={} app_keypad={} kitty_flags={} send={}".format(key,semantic,mod,shift,alt,ctrl,altgr,text,modes.application_cursor,modes.application_keypad,modes.keyboard_flags,self._hex(data)));
         return data;
+
+    def _effective_font_size(self):
+        return max(8,min(72,int(self.preferences.general.font_size)+int(self._font_zoom)));
+
+    def _set_font_zoom(self,pygame,value):
+        base=int(self.preferences.general.font_size); wanted=max(8,min(72,base+int(value))); new_zoom=wanted-base;
+        if new_zoom==self._font_zoom: return self._effective_font_size();
+        self._font_zoom=new_zoom; self._make_fonts(pygame); self._update_size(pygame,self.font,self.header_height); self._force_redraw=True; self._last_render_signature=None;
+        self._trace("ZOOM base={} offset={} effective={}".format(base,self._font_zoom,self._effective_font_size()));
+        return self._effective_font_size();
+
+    def _zoom_font(self,pygame,delta):
+        return self._set_font_zoom(pygame,self._font_zoom+int(delta));
+
+    def _reset_font_zoom(self,pygame):
+        return self._set_font_zoom(pygame,0);
+
+    @staticmethod
+    def _zoom_key_action(pygame,event,state):
+        if not state.get("ctrl") or state.get("altgr") or state.get("alt"): return 0;
+        key=getattr(event,"key",None); text=str(getattr(event,"unicode","") or "");
+        plus={getattr(pygame,"K_EQUALS",None),getattr(pygame,"K_PLUS",None),getattr(pygame,"K_KP_PLUS",None)};
+        minus={getattr(pygame,"K_MINUS",None),getattr(pygame,"K_KP_MINUS",None)};
+        zero={getattr(pygame,"K_0",None),getattr(pygame,"K_KP0",None)};
+        if key in plus or text=="+": return 1;
+        if key in minus or text=="-": return -1;
+        if key in zero or text=="0": return 2;
+        return 0;
 
     def _mouse_bytes(self,pygame,event,pressed=True):
         screen=self.screen_model;
@@ -713,18 +747,21 @@ class GuiTerminalView:
             self._force_redraw=True;
             return True;
         if event.type==getattr(pygame,"MOUSEWHEEL",-999):
+            mods=pygame.key.get_mods(); state=pygame_modifier_state(mods,pygame); amount=int(getattr(event,"y",0) or 0);
+            if state["ctrl"] and not state["altgr"] and amount:
+                self._zoom_font(pygame,1 if amount>0 else -1); return True;
             if self.screen_model.mouse_tracking and self.screen_model.mouse_sgr:
                 button=4 if int(getattr(event,"y",0))>0 else 5;
                 synthetic=type("WheelEvent",(),{"button":button,"pos":pygame.mouse.get_pos()})();
                 data=self._mouse_bytes(pygame,synthetic,True);
                 if data and self.running: self.session.write(data);
             else:
-                amount=int(getattr(event,"y",0) or 0);
                 self._scroll_view(amount*3);
             return True;
         if event.type==pygame.MOUSEBUTTONDOWN:
             mods=pygame.key.get_mods(); state=pygame_modifier_state(mods,pygame); tracked=bool(self.screen_model.mouse_tracking and self.screen_model.mouse_sgr);
             self._trace("MOUSEDOWN button={} pos={} mod={} shift={} alt={} ctrl={} altgr={} mouse={} sgr={}".format(getattr(event,"button",0),getattr(event,"pos",None),mods,state["shift"],state["alt"],state["ctrl"],state["altgr"],self.screen_model.mouse_tracking,self.screen_model.mouse_sgr));
+            if state["ctrl"] and not state["altgr"] and getattr(event,"button",0) in (4,5): self._zoom_font(pygame,1 if event.button==4 else -1); return True;
             if self._context_menu_open and event.button==1: return self._context_menu_click(event.pos);
             if event.button==3 and (not tracked or state["shift"]): return self._open_terminal_context_menu(event.pos);
             handled=event.button==1 and self._handle_header_click(event.pos);
