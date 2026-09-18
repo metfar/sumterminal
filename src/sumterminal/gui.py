@@ -89,6 +89,8 @@ class GuiTerminalView:
         self._last_title="";
         self.font=None;
         self.bold_font=None;
+        self.small_font=None;
+        self.small_bold_font=None;
         self.header_font=None;
         self.toolbar_height=28;
         self.tabbar_height=30;
@@ -204,7 +206,7 @@ class GuiTerminalView:
         return " ".join("{:02x}".format(value) for value in bytes(data or b""));
 
     def _render_signature(self):
-        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size));
+        return (self._active_index,tuple((tab.screen.revision,tab.screen.title,tab.eof,tab.exit_code,tab.scroll_offset) for tab in self._tabs),bool(self.visible),self.preferences.general.theme,self.effective_font_name,int(self.preferences.general.font_size),bool(getattr(self.preferences.general,"font_bold",False)),bool(getattr(self.preferences.general,"font_italic",False)),bool(getattr(self.preferences.general,"font_small_caps",False)));
 
     @staticmethod
     def _max_scroll_offset(tab):
@@ -323,22 +325,32 @@ class GuiTerminalView:
 
     def _make_fonts(self,pygame):
         name=self.preferences.general.font_name; size=self.preferences.general.font_size;
-        def make_font(font_name,font_size,bold=False):
-            path=None;
-            try:
-                if os.path.isfile(str(font_name)): path=str(font_name);
-                else: path=pygame.font.match_font(str(font_name),bold=bold);
-            except Exception: path=None;
-            return pygame.font.Font(path,font_size) if path else pygame.font.SysFont(str(font_name),font_size,bold=bold);
-        self.font=make_font(name,size,False);
+        base_bold=bool(getattr(self.preferences.general,"font_bold",False)); italic=bool(getattr(self.preferences.general,"font_italic",False)); small_caps=bool(getattr(self.preferences.general,"font_small_caps",False));
+        def make_font(font_name,font_size,bold=False,italic_style=False):
+            requested_bold=bool(base_bold or bold); requested_italic=bool(italic_style);
+            if os.path.isfile(str(font_name)):
+                font=pygame.font.Font(str(font_name),font_size);
+                try: font.set_bold(requested_bold);
+                except Exception: pass;
+                try: font.set_italic(requested_italic);
+                except Exception: pass;
+                return font;
+            try: return pygame.font.SysFont(str(font_name),font_size,bold=requested_bold,italic=requested_italic);
+            except TypeError: return pygame.font.SysFont(str(font_name),font_size,bold=requested_bold);
+        self.font=make_font(name,size,False,italic);
         widths=[self.font.size(char)[0] for char in "iMW0@"];
         if max(widths)-min(widths)>1:
             self.effective_font_name="monospace";
-            self.font=make_font("monospace",size,False);
-            self.bold_font=make_font("monospace",size,True);
+            self.font=make_font("monospace",size,False,italic);
+            self.bold_font=make_font("monospace",size,True,italic);
+            effective="monospace";
         else:
             self.effective_font_name=name;
-            self.bold_font=make_font(name,size,True);
+            self.bold_font=make_font(name,size,True,italic);
+            effective=name;
+        small_size=max(8,int(round(size*0.78)));
+        self.small_font=make_font(effective,small_size,False,italic) if small_caps else None;
+        self.small_bold_font=make_font(effective,small_size,True,italic) if small_caps else None;
         self.header_font=pygame.font.SysFont("sans",max(12,min(18,size-2)));
         self.toolbar_height=max(28,self.header_font.get_linesize()+8);
         self.tabbar_height=max(28,self.header_font.get_linesize()+8);
@@ -350,7 +362,21 @@ class GuiTerminalView:
         self.cell_height=max(1,self.font.get_linesize());
         self.glyph_height=max(1,self.font.get_height());
         self.glyph_offset_y=max(0,(self.cell_height-self.glyph_height)//2);
+        self.small_glyph_height=max(1,self.small_font.get_height()) if self.small_font is not None else self.glyph_height;
+        self.small_glyph_offset_y=max(0,self.cell_height-self.small_glyph_height-1);
         return self.font;
+
+    def _glyph_for_cell(self,char,bold=False):
+        use_small=bool(getattr(self.preferences.general,"font_small_caps",False) and str(char).islower());
+        glyph=str(char);
+        if use_small:
+            upper=glyph.upper();
+            if len(upper)==1: glyph=upper;
+            else: use_small=False;
+        if use_small:
+            renderer=self.small_bold_font if bold and self.small_bold_font is not None else self.small_font;
+            return renderer or (self.bold_font if bold and self.bold_font is not None else self.font),glyph,True;
+        return self.bold_font if bold and self.bold_font is not None else self.font,glyph,False;
 
     def _reload_preferences(self,pygame):
         previous=self.preferences; surface=pygame.display.get_surface(); previous_size=surface.get_size() if surface is not None else None;
@@ -509,14 +535,14 @@ class GuiTerminalView:
                 if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y,cell_w,cell_h));
                 char=cell.char or " ";
                 if char!=" ":
-                    renderer=self.bold_font if cell.bold and self.bold_font is not None else font; rendered=renderer.render(char,True,shown_fg); surface.blit(rendered,(x,y+self.glyph_offset_y));
+                    renderer,glyph,small=self._glyph_for_cell(char,cell.bold); rendered=renderer.render(glyph,True,shown_fg); xoff=max(0,(cell_w-rendered.get_width())//2) if small else 0; yoff=self.small_glyph_offset_y if small else self.glyph_offset_y; surface.blit(rendered,(x+xoff,y+yoff));
                 if cell.underline: pygame.draw.line(surface,shown_fg,(x,y+cell_h-2),(x+cell_w,y+cell_h-2),1);
         if tab.scroll_offset==0 and self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
             col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h+self.glyph_offset_y; cursor_h=min(cell_h,self.glyph_height); pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cursor_h));
             try: cell=self.screen_model.lines[self.screen_model.row][col]; char=cell.char;
             except (IndexError,AttributeError): cell=None; char=" ";
             if char and char!=" ":
-                renderer=self.bold_font if cell is not None and cell.bold and self.bold_font is not None else font; rendered=renderer.render(char,True,self.screen_model.default_bg); surface.blit(rendered,(x,y));
+                renderer,glyph,small=self._glyph_for_cell(char,bool(cell is not None and cell.bold)); rendered=renderer.render(glyph,True,self.screen_model.default_bg); xoff=max(0,(cell_w-rendered.get_width())//2) if small else 0; yoff=(self.small_glyph_offset_y-self.glyph_offset_y) if small else 0; surface.blit(rendered,(x+xoff,y+yoff));
 
     def _cell_from_pos(self,pos):
         x,y=pos;

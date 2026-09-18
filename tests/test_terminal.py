@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a16" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a18" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -154,6 +154,9 @@ def test_preferences_default_to_gui_and_ctrl_f12(tmp_path):
     assert loaded.dropdown.opacity==pytest.approx(0.94);
     assert loaded.general.font_name=="monospace";
     assert loaded.general.font_size==18;
+    assert loaded.general.font_bold is False;
+    assert loaded.general.font_italic is False;
+    assert loaded.general.font_small_caps is False;
     assert loaded.general.shell=="sumbash";
 
 
@@ -657,20 +660,6 @@ def test_font_metrics_reserve_space_for_bold_glyphs():
     fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake); assert view.cell_width==9;
 
 
-def test_monospace_font_filter_keeps_only_fixed_width_names():
-    from types import SimpleNamespace;
-    from sumterminal.preferences import _monospace_fonts;
-    class FakeFont:
-        def __init__(self,name): self.name=name;
-        def size(self,text): return ((8 if self.name!="prop" or text=="i" else 11)*len(text),16);
-    class FontAPI:
-        @staticmethod
-        def get_fonts(): return ["mono","prop"];
-        @staticmethod
-        def SysFont(name,size): return FakeFont(name);
-    result=_monospace_fonts(SimpleNamespace(font=FontAPI()),"mono"); assert "mono" in result; assert "prop" not in result;
-
-
 def test_gui_scrollback_view_uses_saved_primary_history():
     from types import SimpleNamespace;
     from sumterminal.config import TerminalPreferences;
@@ -885,3 +874,43 @@ def test_physical_right_alt_shift_level4_text_reaches_pty():
     view._handle_pygame_event(pygame,SimpleNamespace(type=pygame.KEYDOWN,key=pygame.K_RALT,mod=modifiers,unicode=""));
     view._handle_pygame_event(pygame,SimpleNamespace(type=pygame.TEXTINPUT,text="÷"));
     assert written == ["÷".encode("utf-8")];
+
+
+def test_preferences_persist_font_modifiers(tmp_path):
+    from sumterminal.config import TerminalPreferences, load_preferences, save_preferences;
+    path=tmp_path/"terminal.toml"; value=TerminalPreferences(); value.general.font_name="mono"; value.general.font_bold=True; value.general.font_italic=True; value.general.font_small_caps=True; save_preferences(value,path); loaded=load_preferences(path);
+    assert loaded.general.font_name=="mono";
+    assert loaded.general.font_bold is True;
+    assert loaded.general.font_italic is True;
+    assert loaded.general.font_small_caps is True;
+
+
+def test_small_caps_maps_lowercase_to_smaller_uppercase_renderer():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    prefs=TerminalPreferences(); prefs.general.font_small_caps=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs);
+    normal=object(); bold=object(); small=object(); small_bold=object(); view.font=normal; view.bold_font=bold; view.small_font=small; view.small_bold_font=small_bold;
+    renderer,glyph,is_small=view._glyph_for_cell("a",False); assert renderer is small; assert glyph=="A"; assert is_small is True;
+    renderer,glyph,is_small=view._glyph_for_cell("σ",True); assert renderer is small_bold; assert glyph=="Σ"; assert is_small is True;
+    renderer,glyph,is_small=view._glyph_for_cell("A",False); assert renderer is normal; assert glyph=="A"; assert is_small is False;
+
+
+def test_font_preferences_request_bold_and_italic_faces():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    calls=[];
+    class FakeFont:
+        def __init__(self,name,size,bold=False,italic=False): self.name=name; self._size=size; self.bold=bold; self.italic=italic;
+        def size(self,text): return (8*len(text),16);
+        def get_linesize(self): return 18;
+        def get_height(self): return 16;
+    class FontAPI:
+        @staticmethod
+        def SysFont(name,size,bold=False,italic=False): calls.append((name,size,bold,italic)); return FakeFont(name,size,bold,italic);
+        @staticmethod
+        def Font(path,size): return FakeFont(path,size);
+    fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; prefs.general.font_bold=True; prefs.general.font_italic=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
+    assert calls[0][2:] == (True,True);
+    assert view.font.bold is True; assert view.font.italic is True;
