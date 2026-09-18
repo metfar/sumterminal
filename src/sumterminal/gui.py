@@ -64,6 +64,9 @@ class _TerminalTab:
         self.eof=False;
         self.exit_code=None;
         self.scroll_offset=0;
+        self.selection_anchor=None;
+        self.selection_head=None;
+        self.selecting=False;
 
 
 class GuiTerminalView:
@@ -102,6 +105,10 @@ class GuiTerminalView:
         self._new_tab_rect=None;
         self._tab_rects=[];
         self._tab_close_rects=[];
+        self._context_menu_open=False;
+        self._context_menu_pos=(0,0);
+        self._context_menu_rect=None;
+        self._context_menu_items=[];
         self.sum_theme=resolve_theme(self.preferences.general.theme);
         self.theme=None;
         self._runtime_error=None;
@@ -379,6 +386,10 @@ class GuiTerminalView:
         key=event.key; mod=event.mod;
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
         if (mod & pygame.KMOD_CTRL) and key==pygame.K_COMMA: self._open_preferences(); return b"";
+        if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==getattr(pygame,"K_c",-999): self._copy_selection(); return b"";
+        if (mod & pygame.KMOD_CTRL) and key==getattr(pygame,"K_INSERT",-999): self._copy_selection(); return b"";
+        if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==getattr(pygame,"K_v",-999): self._paste_clipboard(); return b"";
+        if (mod & pygame.KMOD_SHIFT) and key==getattr(pygame,"K_INSERT",-999): self._paste_clipboard(); return b"";
         if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==pygame.K_t: self._new_tab(); return b"";
         shift=bool(mod & pygame.KMOD_SHIFT); alt=bool(mod & pygame.KMOD_ALT); ctrl=bool(mod & pygame.KMOD_CTRL); semantic=self._semantic_key(pygame,key); text=getattr(event,"unicode","");
         if shift and semantic=="pageup": self._scroll_view(max(1,self.screen_model.rows-1)); return b"";
@@ -470,11 +481,17 @@ class GuiTerminalView:
         return False;
 
     def _draw_screen(self,pygame,surface,font,theme,header_height,cell_w,cell_h):
-        y0=header_height; tab=self.active_tab; viewport=self._viewport_lines(tab);
+        y0=header_height; tab=self.active_tab; viewport=self._viewport_lines(tab); bounds=self._selection_bounds(tab);
+        _fg,_bg,_cursor,selection_bg,selection_text=terminal_colors(self.sum_theme);
         for row,line in enumerate(viewport):
             y=y0+row*cell_h;
             for column,cell in enumerate(line):
-                x=column*cell_w; fg,bg=(cell.bg,cell.fg) if cell.inverse else (cell.fg,cell.bg); shown_fg=_display_fg(self.screen_model,fg,cell.bold);
+                x=column*cell_w; fg,bg=(cell.bg,cell.fg) if cell.inverse else (cell.fg,cell.bg);
+                selected=False;
+                if bounds is not None:
+                    start,end=bounds; selected=start <= (row,column) <= end;
+                if selected: fg,bg=selection_text,selection_bg;
+                shown_fg=_display_fg(self.screen_model,fg,cell.bold);
                 if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y,cell_w,cell_h));
                 char=cell.char or " ";
                 if char!=" ":
@@ -486,6 +503,95 @@ class GuiTerminalView:
             except (IndexError,AttributeError): cell=None; char=" ";
             if char and char!=" ":
                 renderer=self.bold_font if cell is not None and cell.bold and self.bold_font is not None else font; rendered=renderer.render(char,True,self.screen_model.default_bg); surface.blit(rendered,(x,y));
+
+    def _cell_from_pos(self,pos):
+        x,y=pos;
+        if y<self.header_height: return None;
+        row=max(0,min(self.screen_model.rows-1,(int(y)-self.header_height)//max(1,self.cell_height)));
+        column=max(0,min(self.screen_model.columns-1,int(x)//max(1,self.cell_width)));
+        return (row,column);
+
+    def _selection_bounds(self,tab=None):
+        tab=tab or self.active_tab;
+        if tab.selection_anchor is None or tab.selection_head is None: return None;
+        a=tuple(tab.selection_anchor); b=tuple(tab.selection_head);
+        return (a,b) if a<=b else (b,a);
+
+    def _selected_text(self,tab=None):
+        tab=tab or self.active_tab; bounds=self._selection_bounds(tab);
+        if bounds is None: return "";
+        (r0,c0),(r1,c1)=bounds; viewport=self._viewport_lines(tab); lines=[];
+        for row in range(r0,r1+1):
+            if not (0<=row<len(viewport)): continue;
+            start=c0 if row==r0 else 0; end=(c1+1) if row==r1 else len(viewport[row]);
+            text="".join((cell.char or " ") for cell in viewport[row][start:end]).rstrip(" \t");
+            lines.append(text);
+        return "\n".join(lines).rstrip(" \t");
+
+    def _copy_selection(self):
+        text=self._selected_text();
+        if not text: return False;
+        try:
+            from sumgui.clipboard import set_clipboard_text;
+            set_clipboard_text(text);
+            return True;
+        except Exception: return False;
+
+    def _paste_bytes(self,text):
+        value=str(text or "");
+        if not value or not self.running: return False;
+        data=value.encode("utf-8");
+        if self.screen_model.bracketed_paste: data=b"\x1b[200~"+data+b"\x1b[201~";
+        self.session.write(data); self.active_tab.scroll_offset=0; self._force_redraw=True; return True;
+
+    def _paste_clipboard(self):
+        try:
+            from sumgui.clipboard import get_clipboard_text;
+            return self._paste_bytes(get_clipboard_text());
+        except Exception: return False;
+
+    def _paste_special_markdown(self):
+        try:
+            from sumdoc.clipboard import special_paste_text;
+            return self._paste_bytes(special_paste_text("markdown"));
+        except Exception: return False;
+
+    def _terminal_context_items(self):
+        items=[("Copy",self._copy_selection,bool(self._selected_text())),("Paste",self._paste_clipboard,True)];
+        try:
+            from sumdoc.clipboard import special_paste_options;
+            available={kind for kind,_label in special_paste_options()};
+            if "markdown" in available: items.append(("Paste special: Markdown",self._paste_special_markdown,True));
+        except Exception: pass;
+        return items;
+
+    def _open_terminal_context_menu(self,pos):
+        self._context_menu_open=True; self._context_menu_pos=tuple(pos); self._context_menu_items=self._terminal_context_items(); self._context_menu_rect=None; self._force_redraw=True; return True;
+
+    def _close_terminal_context_menu(self):
+        changed=self._context_menu_open; self._context_menu_open=False; self._context_menu_rect=None; self._force_redraw=True; return changed;
+
+    def _context_menu_click(self,pos):
+        if not self._context_menu_open or self._context_menu_rect is None: return False;
+        rect=self._context_menu_rect;
+        if not rect.collidepoint(pos): return self._close_terminal_context_menu();
+        row=(int(pos[1])-rect.top-4)//max(1,self.header_font.get_linesize()+4);
+        if 0<=row<len(self._context_menu_items):
+            _label,action,enabled=self._context_menu_items[row];
+            if enabled: action();
+        self._close_terminal_context_menu(); return True;
+
+    def _draw_terminal_context_menu(self,pygame,surface):
+        if not self._context_menu_open: self._context_menu_rect=None; return False;
+        items=self._terminal_context_items(); self._context_menu_items=items;
+        font=self.header_font or self.font; line_h=max(18,font.get_linesize()+4);
+        width=max([font.size(label)[0] for label,_action,_enabled in items] or [100])+24; height=max(1,len(items))*line_h+8;
+        x,y=self._context_menu_pos; x=max(0,min(int(x),surface.get_width()-width)); y=max(self.header_height,min(int(y),surface.get_height()-height));
+        rect=pygame.Rect(x,y,width,height); self._context_menu_rect=rect;
+        pygame.draw.rect(surface,self.theme.panel,rect); pygame.draw.rect(surface,self.theme.line,rect,1);
+        for index,(label,_action,enabled) in enumerate(items):
+            text=font.render(label,True,self.theme.text if enabled else self.theme.muted); surface.blit(text,(x+8,y+4+index*line_h));
+        return True;
 
     def _service_sessions(self):
         running=[]; mapping={};
@@ -554,7 +660,15 @@ class GuiTerminalView:
                 self._scroll_view(amount*3);
             return True;
         if event.type==pygame.MOUSEBUTTONDOWN:
+            if self._context_menu_open and event.button==1: return self._context_menu_click(event.pos);
+            if event.button==3: return self._open_terminal_context_menu(event.pos);
             handled=event.button==1 and self._handle_header_click(event.pos);
+            if not handled and event.button==1:
+                mods=pygame.key.get_mods(); force_select=bool(mods & pygame.KMOD_SHIFT); tracked=bool(self.screen_model.mouse_tracking and self.screen_model.mouse_sgr);
+                if force_select or not tracked:
+                    cell=self._cell_from_pos(event.pos);
+                    if cell is not None:
+                        self.active_tab.selection_anchor=cell; self.active_tab.selection_head=cell; self.active_tab.selecting=True; self._force_redraw=True; return True;
             if not handled:
                 data=self._mouse_bytes(pygame,event,True);
                 if data and self.running: self.session.write(data);
@@ -562,10 +676,18 @@ class GuiTerminalView:
                 elif not hasattr(pygame,"MOUSEWHEEL") and event.button==5: self._scroll_view(-3);
             return True;
         if event.type==pygame.MOUSEBUTTONUP:
+            if event.button==1 and self.active_tab.selecting:
+                cell=self._cell_from_pos(event.pos);
+                if cell is not None: self.active_tab.selection_head=cell;
+                self.active_tab.selecting=False; self._force_redraw=True; return True;
             data=self._mouse_bytes(pygame,event,False);
             if data and self.running: self.session.write(data);
             return True;
         if event.type==pygame.MOUSEMOTION:
+            if self.active_tab.selecting:
+                cell=self._cell_from_pos(event.pos);
+                if cell is not None: self.active_tab.selection_head=cell; self._force_redraw=True;
+                return True;
             data=self._mouse_motion_bytes(pygame,event);
             if data and self.running: self.session.write(data);
             return True;
@@ -595,6 +717,7 @@ class GuiTerminalView:
         self._draw_header(pygame,surface,self.header_font,theme,self.header_height);
         pygame.draw.rect(surface,self.screen_model.default_bg,(0,self.header_height,surface.get_width(),max(0,surface.get_height()-self.header_height)));
         self._draw_screen(pygame,surface,self.font,theme,self.header_height,cell_w,cell_h);
+        self._draw_terminal_context_menu(pygame,surface);
         self._draw_runtime_error_overlay(pygame,surface);
         pygame.display.flip();
         self._last_render_signature=self._render_signature();

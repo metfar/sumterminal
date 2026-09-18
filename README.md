@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a13
+# sumTerminal 0.1.0a14
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -162,3 +162,8 @@ Still later slices:
 - broader VT/xterm compatibility for highly specialised full-screen applications.
 
 <p align=center><b>- oOo -</b></p>
+
+## Selection and clipboard
+
+`sumTerminal 0.1.0a14` adds native terminal selection and clipboard actions. Drag with the left mouse button to select when the child application is not using mouse tracking; hold **Shift** while dragging to force terminal selection when applications such as `mc` own the mouse. **Ctrl+Shift+C** or **Ctrl+Insert** copies, **Ctrl+Shift+V** or **Shift+Insert** pastes, and bracketed-paste mode is honoured. Right-click opens **Copy / Paste / Paste special: Markdown** when SumDoc can provide a rich textual representation. `Ctrl+C` remains a PTY interrupt and is deliberately not repurposed as Copy.
+

@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a13" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a14" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -757,3 +757,29 @@ def test_cli_print_crash_log(capsys):
     from sumterminal import cli;
     assert cli.main(["--print-crash-log"])==0;
     assert capsys.readouterr().out.strip().endswith("crash.log");
+
+
+def test_terminal_selection_copy_text_trims_right_padding():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    session=SimpleNamespace(size=TerminalSize(3,8));
+    view=GuiTerminalView(session,preferences=TerminalPreferences());
+    view.screen_model.feed("alpha   \r\nbeta    ");
+    tab=view.active_tab;
+    tab.selection_anchor=(0,0);
+    tab.selection_head=(1,7);
+    assert view._selected_text(tab) == "alpha\nbeta";
+
+
+def test_terminal_bracketed_paste_wraps_clipboard_text():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    written=[];
+    session=SimpleNamespace(size=TerminalSize(3,8),write=lambda data:written.append(data));
+    view=GuiTerminalView(session,preferences=TerminalPreferences());
+    view.running=True;
+    view.screen_model.bracketed_paste=True;
+    assert view._paste_bytes("hello");
+    assert written == [b"\x1b[200~hello\x1b[201~"];
