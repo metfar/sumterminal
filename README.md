@@ -1,4 +1,4 @@
-# sumTerminal 0.1.0a19
+# sumTerminal 0.1.0a20
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.
 
@@ -176,6 +176,6 @@ Still later slices:
 Selection and clipboard support exchanges text with the system clipboard. Drag with the left mouse button to select when the child application is not using mouse tracking; hold **Shift** while dragging to force terminal selection when applications such as `mc` own the mouse. **Ctrl+Shift+C** or **Ctrl+Insert** copies, **Ctrl+Shift+V** or **Shift+Insert** pastes, and bracketed-paste mode is honoured. Right-click opens **Copy / Paste / Paste special: Markdown** when SumDoc can provide a rich textual representation. `Ctrl+C` remains a PTY interrupt and is deliberately not repurposed as Copy.
 
 
-## FontPicker preferences (0.1.0a19)
+## FontPicker preferences (0.1.0a20)
 
-Terminal Preferences now consumes the reusable SumGUI `FontPicker`. Monospaced font families are sorted alphabetically and the editable combo filters by case-insensitive substring as you type. The dropdown includes a vertical scrollbar linked to the mouse wheel and supports thumb dragging, track paging and keyboard PageUp/PageDown/Home/End. Bold, Italic and Small Caps are persisted in `terminal.toml`. Small Caps is a presentation mode: lowercase input remains lowercase in the PTY/screen model and is rendered as a smaller uppercase glyph, preserving the underlying text.
+Terminal Preferences now consumes the reusable SumGUI `FontPicker`. Monospaced font families are sorted alphabetically and the editable combo filters by case-insensitive substring as you type. The dropdown includes a vertical scrollbar linked to the mouse wheel and supports thumb dragging, track paging and keyboard PageUp/PageDown/Home/End. Bold, Italic and Small Caps are persisted in `terminal.toml`. Small Caps is a presentation mode: lowercase input remains lowercase in the PTY/screen model and is rendered as a 65% uppercase glyph, centered by its visible ink inside the unchanged terminal cell and aligned to the same baseline as normal capitals. The underlying text is preserved.

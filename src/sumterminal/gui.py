@@ -42,6 +42,9 @@ from sumui.keyboard import pygame_modifier_state;
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT","1");
 
 
+SMALL_CAPS_SCALE=0.65;
+
+
 def _prepare_pygame_runtime():
     warnings.filterwarnings("ignore",message=r"Your system is avx2 capable.*",category=RuntimeWarning);
     warnings.filterwarnings("ignore",message=r"pkg_resources is deprecated as an API.*",category=UserWarning);
@@ -348,7 +351,7 @@ class GuiTerminalView:
             self.effective_font_name=name;
             self.bold_font=make_font(name,size,True,italic);
             effective=name;
-        small_size=max(8,int(round(size*0.78)));
+        small_size=max(6,int(round(size*SMALL_CAPS_SCALE)));
         self.small_font=make_font(effective,small_size,False,italic) if small_caps else None;
         self.small_bold_font=make_font(effective,small_size,True,italic) if small_caps else None;
         self.header_font=pygame.font.SysFont("sans",max(12,min(18,size-2)));
@@ -363,8 +366,28 @@ class GuiTerminalView:
         self.glyph_height=max(1,self.font.get_height());
         self.glyph_offset_y=max(0,(self.cell_height-self.glyph_height)//2);
         self.small_glyph_height=max(1,self.small_font.get_height()) if self.small_font is not None else self.glyph_height;
-        self.small_glyph_offset_y=max(0,self.cell_height-self.small_glyph_height-1);
+        try: base_ascent=max(1,int(self.font.get_ascent()));
+        except Exception: base_ascent=self.glyph_height;
+        self.glyph_baseline_y=self.glyph_offset_y+base_ascent;
+        if self.small_font is not None:
+            try: small_ascent=max(1,int(self.small_font.get_ascent()));
+            except Exception: small_ascent=self.small_glyph_height;
+            self.small_glyph_offset_y=self.glyph_baseline_y-small_ascent;
+        else:
+            self.small_glyph_offset_y=self.glyph_offset_y;
         return self.font;
+
+    @staticmethod
+    def _small_caps_x_offset(rendered,cell_width):
+        """Center the visible ink of a reduced capital inside a fixed-width cell.""";
+        try:
+            bounds=rendered.get_bounding_rect(min_alpha=1);
+            if int(bounds.width)>0:
+                return int(round((int(cell_width)-int(bounds.width))/2.0))-int(bounds.x);
+        except Exception: pass;
+        try: width=int(rendered.get_width());
+        except Exception: width=int(cell_width);
+        return int(round((int(cell_width)-width)/2.0));
 
     def _glyph_for_cell(self,char,bold=False):
         use_small=bool(getattr(self.preferences.general,"font_small_caps",False) and str(char).islower());
@@ -535,14 +558,14 @@ class GuiTerminalView:
                 if bg!=self.screen_model.default_bg: pygame.draw.rect(surface,bg,(x,y,cell_w,cell_h));
                 char=cell.char or " ";
                 if char!=" ":
-                    renderer,glyph,small=self._glyph_for_cell(char,cell.bold); rendered=renderer.render(glyph,True,shown_fg); xoff=max(0,(cell_w-rendered.get_width())//2) if small else 0; yoff=self.small_glyph_offset_y if small else self.glyph_offset_y; surface.blit(rendered,(x+xoff,y+yoff));
+                    renderer,glyph,small=self._glyph_for_cell(char,cell.bold); rendered=renderer.render(glyph,True,shown_fg); xoff=self._small_caps_x_offset(rendered,cell_w) if small else 0; yoff=self.small_glyph_offset_y if small else self.glyph_offset_y; surface.blit(rendered,(x+xoff,y+yoff));
                 if cell.underline: pygame.draw.line(surface,shown_fg,(x,y+cell_h-2),(x+cell_w,y+cell_h-2),1);
         if tab.scroll_offset==0 and self.screen_model.cursor_visible and 0<=self.screen_model.row<self.screen_model.rows:
             col=min(self.screen_model.columns-1,max(0,self.screen_model.col)); x=col*cell_w; y=y0+self.screen_model.row*cell_h+self.glyph_offset_y; cursor_h=min(cell_h,self.glyph_height); pygame.draw.rect(surface,theme.cursor,(x,y,cell_w,cursor_h));
             try: cell=self.screen_model.lines[self.screen_model.row][col]; char=cell.char;
             except (IndexError,AttributeError): cell=None; char=" ";
             if char and char!=" ":
-                renderer,glyph,small=self._glyph_for_cell(char,bool(cell is not None and cell.bold)); rendered=renderer.render(glyph,True,self.screen_model.default_bg); xoff=max(0,(cell_w-rendered.get_width())//2) if small else 0; yoff=(self.small_glyph_offset_y-self.glyph_offset_y) if small else 0; surface.blit(rendered,(x+xoff,y+yoff));
+                renderer,glyph,small=self._glyph_for_cell(char,bool(cell is not None and cell.bold)); rendered=renderer.render(glyph,True,self.screen_model.default_bg); xoff=self._small_caps_x_offset(rendered,cell_w) if small else 0; yoff=(self.small_glyph_offset_y-self.glyph_offset_y) if small else 0; surface.blit(rendered,(x+xoff,y+yoff));
 
     def _cell_from_pos(self,pos):
         x,y=pos;

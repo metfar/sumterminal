@@ -128,7 +128,7 @@ def test_cli_version(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"]);
     assert exc.value.code==0;
-    assert "sumterminal 0.1.0a19" in capsys.readouterr().out;
+    assert "sumterminal 0.1.0a20" in capsys.readouterr().out;
 
 
 def test_terminal_session_advertises_its_own_capabilities(tmp_path):
@@ -925,3 +925,50 @@ def test_preferences_migrate_incomplete_shortcut_without_losing_other_settings(t
     assert loaded.dropdown.height==61;
     assert loaded.general.font_name=="DejaVu Sans Mono";
     assert loaded.general.font_size==21;
+
+
+def test_small_caps_geometry_is_65_percent_centered_and_baseline_aligned():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView, SMALL_CAPS_SCALE;
+    calls=[];
+    class Rect:
+        def __init__(self,x,width): self.x=x; self.width=width;
+    class Rendered:
+        def get_bounding_rect(self,min_alpha=1): return Rect(2,4);
+        def get_width(self): return 8;
+    class FakeFont:
+        def __init__(self,name,size,bold=False,italic=False): self.name=name; self._size=size; self.bold=bold; self.italic=italic;
+        def size(self,text): return (10*len(text),20);
+        def get_linesize(self): return 22 if self._size>=20 else 15;
+        def get_height(self): return 20 if self._size>=20 else 13;
+        def get_ascent(self): return 15 if self._size>=20 else 10;
+    class FontAPI:
+        @staticmethod
+        def SysFont(name,size,bold=False,italic=False): calls.append((name,size,bold,italic)); return FakeFont(name,size,bold,italic);
+        @staticmethod
+        def Font(path,size): return FakeFont(path,size);
+    fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_name="mono"; prefs.general.font_size=20; prefs.general.font_small_caps=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
+    assert SMALL_CAPS_SCALE==0.65;
+    assert any(call[1]==13 for call in calls);
+    assert view.glyph_offset_y+view.font.get_ascent()==view.small_glyph_offset_y+view.small_font.get_ascent();
+    assert view._small_caps_x_offset(Rendered(),10)==1;
+
+
+def test_small_caps_does_not_change_cell_width():
+    from types import SimpleNamespace;
+    from sumterminal.config import TerminalPreferences;
+    from sumterminal.gui import GuiTerminalView;
+    class FakeFont:
+        def __init__(self,size): self._size=size;
+        def size(self,text): return (9*len(text),18);
+        def get_linesize(self): return 20;
+        def get_height(self): return 18;
+        def get_ascent(self): return 14 if self._size>=18 else 9;
+    class FontAPI:
+        @staticmethod
+        def SysFont(name,size,bold=False,italic=False): return FakeFont(size);
+        @staticmethod
+        def Font(path,size): return FakeFont(size);
+    fake=SimpleNamespace(font=FontAPI()); prefs=TerminalPreferences(); prefs.general.font_size=18; prefs.general.font_small_caps=True; session=SimpleNamespace(size=TerminalSize(24,80)); view=GuiTerminalView(session,preferences=prefs); view._make_fonts(fake);
+    assert view.cell_width==9;
