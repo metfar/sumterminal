@@ -1,3 +1,25 @@
+Metadata-Version: 2.4
+Name: sumterminal
+Version: 0.1.0a15
+Summary: SUM terminal/session engine with graphical, drop-down and host frontends.
+Author-email: William Martinez Bas <metfar@gmail.com>
+License-Expression: GPL-2.0-or-later
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: System :: Shells
+Classifier: Topic :: Terminals
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: sumfsa>=0.1.0a1
+Requires-Dist: sumio>=0.1.0a1
+Requires-Dist: sumbash>=0.1.0a17
+Requires-Dist: sumgui>=0.2.0a25
+Requires-Dist: sumtui>=0.8.0a29
+Requires-Dist: sumkeyboard>=0.1.0a2
+Dynamic: license-file
+
 # sumTerminal 0.1.0a15
 
 `sumTerminal` is the reusable terminal/session layer for SUM. It is intentionally separate from `sumbash`: the shell supplies commands and language semantics; the terminal supplies PTY/session ownership and presentation.

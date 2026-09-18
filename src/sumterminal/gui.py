@@ -36,6 +36,7 @@ from .model import TerminalSize;
 from .screen import TerminalScreen;
 from .session import TerminalSession;
 from .theme import gui_theme, resolve_theme, terminal_ansi16, terminal_colors;
+from sumui.keyboard import pygame_modifier_state;
 
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT","1");
@@ -383,20 +384,20 @@ class GuiTerminalView:
         return name.casefold() if isinstance(name,str) else "";
 
     def _key_bytes(self,pygame,event):
-        key=event.key; mod=event.mod;
-        if (mod & pygame.KMOD_CTRL) and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
-        if (mod & pygame.KMOD_CTRL) and key==pygame.K_COMMA: self._open_preferences(); return b"";
-        if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==getattr(pygame,"K_c",-999): self._copy_selection(); return b"";
-        if (mod & pygame.KMOD_CTRL) and key==getattr(pygame,"K_INSERT",-999): self._copy_selection(); return b"";
-        if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==getattr(pygame,"K_v",-999): self._paste_clipboard(); return b"";
-        if (mod & pygame.KMOD_SHIFT) and key==getattr(pygame,"K_INSERT",-999): self._paste_clipboard(); return b"";
-        if (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_SHIFT) and key==pygame.K_t: self._new_tab(); return b"";
-        shift=bool(mod & pygame.KMOD_SHIFT); alt=bool(mod & pygame.KMOD_ALT); ctrl=bool(mod & pygame.KMOD_CTRL); semantic=self._semantic_key(pygame,key); text=getattr(event,"unicode","");
+        key=event.key; mod=event.mod; state=pygame_modifier_state(mod,pygame); shift=state["shift"]; alt=state["alt"]; ctrl=state["ctrl"]; altgr=state["altgr"];
+        if ctrl and key==pygame.K_F12 and self.drop_down: self.toggle_visible(); return b"";
+        if ctrl and key==pygame.K_COMMA: self._open_preferences(); return b"";
+        if ctrl and shift and key==getattr(pygame,"K_c",-999): self._copy_selection(); return b"";
+        if ctrl and key==getattr(pygame,"K_INSERT",-999): self._copy_selection(); return b"";
+        if ctrl and shift and key==getattr(pygame,"K_v",-999): self._paste_clipboard(); return b"";
+        if shift and key==getattr(pygame,"K_INSERT",-999): self._paste_clipboard(); return b"";
+        if ctrl and shift and key==pygame.K_t: self._new_tab(); return b"";
+        semantic=self._semantic_key(pygame,key); text=getattr(event,"unicode","");
         if shift and semantic=="pageup": self._scroll_view(max(1,self.screen_model.rows-1)); return b"";
         if shift and semantic=="pagedown": self._scroll_view(-max(1,self.screen_model.rows-1)); return b"";
         data=self.active_tab.encoder.encode_key(semantic,shift=shift,alt=alt,ctrl=ctrl,text=text); modes=self.screen_model.modes;
         if data and self.active_tab.scroll_offset: self.active_tab.scroll_offset=0; self._force_redraw=True;
-        self._trace("KEYDOWN key={} semantic={} mod={} shift={} alt={} ctrl={} text={!r} app_cursor={} app_keypad={} kitty_flags={} send={}".format(key,semantic,mod,shift,alt,ctrl,text,modes.application_cursor,modes.application_keypad,modes.keyboard_flags,self._hex(data)));
+        self._trace("KEYDOWN key={} semantic={} mod={} shift={} alt={} ctrl={} altgr={} text={!r} app_cursor={} app_keypad={} kitty_flags={} send={}".format(key,semantic,mod,shift,alt,ctrl,altgr,text,modes.application_cursor,modes.application_keypad,modes.keyboard_flags,self._hex(data)));
         return data;
 
     def _mouse_bytes(self,pygame,event,pressed=True):
@@ -406,7 +407,7 @@ class GuiTerminalView:
         x,y=event.pos;
         if y<self.header_height: return b"";
         column=max(1,min(screen.columns,(int(x)//max(1,self.cell_width))+1)); row=max(1,min(screen.rows,((int(y)-self.header_height)//max(1,self.cell_height))+1));
-        mod=pygame.key.get_mods(); modifier=(4 if mod & pygame.KMOD_SHIFT else 0)+(8 if mod & pygame.KMOD_ALT else 0)+(16 if mod & pygame.KMOD_CTRL else 0);
+        mod=pygame.key.get_mods(); state=pygame_modifier_state(mod,pygame); modifier=(4 if state["shift"] else 0)+(8 if state["alt"] else 0)+(16 if state["ctrl"] else 0);
         button_map={1:0,2:1,3:2,4:64,5:65}; button=int(getattr(event,"button",1)); code=button_map.get(button,0)+modifier;
         final="M" if pressed or button in (4,5) else "m";
         return "\x1b[<{};{};{}{}".format(code,column,row,final).encode("ascii");
@@ -424,7 +425,7 @@ class GuiTerminalView:
         x,y=event.pos;
         if y<self.header_height: return b"";
         column=max(1,min(screen.columns,(int(x)//max(1,self.cell_width))+1)); row=max(1,min(screen.rows,((int(y)-self.header_height)//max(1,self.cell_height))+1));
-        mod=pygame.key.get_mods(); modifier=(4 if mod & pygame.KMOD_SHIFT else 0)+(8 if mod & pygame.KMOD_ALT else 0)+(16 if mod & pygame.KMOD_CTRL else 0); code=32+base+modifier;
+        mod=pygame.key.get_mods(); state=pygame_modifier_state(mod,pygame); modifier=(4 if state["shift"] else 0)+(8 if state["alt"] else 0)+(16 if state["ctrl"] else 0); code=32+base+modifier;
         return "\x1b[<{};{};{}M".format(code,column,row).encode("ascii");
 
     def _update_size(self,pygame,font,header_height):
@@ -532,7 +533,7 @@ class GuiTerminalView:
         text=self._selected_text();
         if not text: return False;
         try:
-            from sumgui.clipboard import set_clipboard_text;
+            from sumui.clipboard import set_clipboard_text;
             set_clipboard_text(text);
             return True;
         except Exception: return False;
@@ -546,7 +547,7 @@ class GuiTerminalView:
 
     def _paste_clipboard(self):
         try:
-            from sumgui.clipboard import get_clipboard_text;
+            from sumui.clipboard import get_clipboard_text;
             return self._paste_bytes(get_clipboard_text());
         except Exception: return False;
 
@@ -583,7 +584,7 @@ class GuiTerminalView:
 
     def _draw_terminal_context_menu(self,pygame,surface):
         if not self._context_menu_open: self._context_menu_rect=None; return False;
-        items=self._terminal_context_items(); self._context_menu_items=items;
+        items=self._context_menu_items;
         font=self.header_font or self.font; line_h=max(18,font.get_linesize()+4);
         width=max([font.size(label)[0] for label,_action,_enabled in items] or [100])+24; height=max(1,len(items))*line_h+8;
         x,y=self._context_menu_pos; x=max(0,min(int(x),surface.get_width()-width)); y=max(self.header_height,min(int(y),surface.get_height()-height));
@@ -660,11 +661,13 @@ class GuiTerminalView:
                 self._scroll_view(amount*3);
             return True;
         if event.type==pygame.MOUSEBUTTONDOWN:
+            mods=pygame.key.get_mods(); state=pygame_modifier_state(mods,pygame); tracked=bool(self.screen_model.mouse_tracking and self.screen_model.mouse_sgr);
+            self._trace("MOUSEDOWN button={} pos={} mod={} shift={} alt={} ctrl={} altgr={} mouse={} sgr={}".format(getattr(event,"button",0),getattr(event,"pos",None),mods,state["shift"],state["alt"],state["ctrl"],state["altgr"],self.screen_model.mouse_tracking,self.screen_model.mouse_sgr));
             if self._context_menu_open and event.button==1: return self._context_menu_click(event.pos);
-            if event.button==3: return self._open_terminal_context_menu(event.pos);
+            if event.button==3 and (not tracked or state["shift"]): return self._open_terminal_context_menu(event.pos);
             handled=event.button==1 and self._handle_header_click(event.pos);
             if not handled and event.button==1:
-                mods=pygame.key.get_mods(); force_select=bool(mods & pygame.KMOD_SHIFT); tracked=bool(self.screen_model.mouse_tracking and self.screen_model.mouse_sgr);
+                force_select=state["shift"];
                 if force_select or not tracked:
                     cell=self._cell_from_pos(event.pos);
                     if cell is not None:
@@ -676,6 +679,8 @@ class GuiTerminalView:
                 elif not hasattr(pygame,"MOUSEWHEEL") and event.button==5: self._scroll_view(-3);
             return True;
         if event.type==pygame.MOUSEBUTTONUP:
+            mods=pygame.key.get_mods(); state=pygame_modifier_state(mods,pygame);
+            self._trace("MOUSEUP button={} pos={} mod={} shift={} alt={} ctrl={} altgr={} mouse={} sgr={}".format(getattr(event,"button",0),getattr(event,"pos",None),mods,state["shift"],state["alt"],state["ctrl"],state["altgr"],self.screen_model.mouse_tracking,self.screen_model.mouse_sgr));
             if event.button==1 and self.active_tab.selecting:
                 cell=self._cell_from_pos(event.pos);
                 if cell is not None: self.active_tab.selection_head=cell;
@@ -696,9 +701,10 @@ class GuiTerminalView:
             if data and self.running: self.session.write(data);
             return True;
         if event.type==pygame.TEXTINPUT:
-            modifiers=pygame.key.get_mods();
-            if event.text and self.running and not (modifiers & (pygame.KMOD_CTRL | pygame.KMOD_ALT | pygame.KMOD_GUI)):
+            modifiers=pygame.key.get_mods(); state=pygame_modifier_state(modifiers,pygame);
+            if event.text and self.running and not (state["ctrl"] or state["alt"] or state["gui"]):
                 self.session.write(event.text.encode("utf-8"));
+                self._trace("TEXTINPUT mod={} altgr={} text={!r}".format(modifiers,state["altgr"],event.text));
             return True;
         if self.drop_down and self.preferences.dropdown.hide_on_focus_loss and event.type==getattr(pygame,"WINDOWFOCUSLOST",-999):
             self._set_visible(False);
